@@ -19,8 +19,8 @@ function extractIdsFromText(text: string): string[] {
     return [...text.matchAll(/<@!?(\d+)>/g)].map(x => x[1]);
 }
 
-function scrapeMessageData(message: any, ids: string[]) {
-    if (!message) return;
+function extractAllMentionIds(message: any): string[] {
+    const ids: string[] = [];
 
     if (message.content) {
         ids.push(...extractIdsFromText(message.content));
@@ -41,24 +41,6 @@ function scrapeMessageData(message: any, ids: string[]) {
                 }
             }
         }
-    }
-}
-
-function extractAllMentionIds(message: any): string[] {
-    const ids: string[] = [];
-
-    // 1. Scrape standard base layers
-    scrapeMessageData(message, ids);
-
-    // 2. Scan forwarded payload layouts securely if present
-    if (message.messageReference?.message) {
-        scrapeMessageData(message.messageReference.message, ids);
-    }
-    if (message.forwardedMessage) {
-        scrapeMessageData(message.forwardedMessage, ids);
-    }
-    if (message.snapshot?.message) {
-        scrapeMessageData(message.snapshot.message, ids);
     }
 
     return [...new Set(ids)];
