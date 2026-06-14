@@ -28,7 +28,7 @@ const styles = stylesheet.createThemedStyleSheet({
         padding: 10,
         borderRadius: 8,
         fontSize: 16,
-        color: semanticColors.TEXT_NORMAL,
+        color: "#ffffff", // Hardcoded to white to prevent system theme black overrides
         backgroundColor: semanticColors.BACKGROUND_TERTIARY,
         borderColor: semanticColors.BACKGROUND_MODIFIER_ACCENT,
         borderWidth: 1,
@@ -105,7 +105,7 @@ function openLocalEditPreview(message: any) {
         children: React.createElement(LocalPreviewModal, { message })
     };
 
-    // @ts-expect-error - children is completely fine here but missing in base typings
+    // @ts-expect-error - children is missing in type layouts but safely processed natively
     showConfirmationAlert(alertOptions);
 }
 
