@@ -1,62 +1,27 @@
-import { findByName, findByProps, findByStoreName } from "@vendetta/metro";
+// Permission Viewer Plugin for Revenge/Bunny
+import { findByStoreName, findByProps, findAllExports } from "@vendetta/metro";
 import { after } from "@vendetta/patcher";
-import { React, ReactNative as RN, stylesheet } from "@vendetta/metro/common";
-import { semanticColors } from "@vendetta/ui";
+import { React } from "@vendetta/metro/common";
+import { findInReactTree } from "@vendetta/utils";
 
 const GuildStore = findByStoreName("GuildStore");
-const SelectedGuildStore = findByStoreName("SelectedGuildStore");
 const GuildMemberStore = findByStoreName("GuildMemberStore");
-const PermissionUtils = findByProps("getGuildPermissionProps", "computePermissions");
+const ChannelStore = findByStoreName("ChannelStore");
+const SelectedChannelStore = findByStoreName("SelectedChannelStore");
+const SelectedGuildStore = findByStoreName("SelectedGuildStore") || findByProps("getGuildId");
 
-// Locate the section container object we discovered via eval
-const UserProfileSection = findByName("UserProfileSection", false);
+// Resolve core permission utility structures securely
+const PermsModule = findAllExports(
+    m => typeof m?.computePermissions === "function" &&
+         typeof m?.can === "function" &&
+         typeof m?.computePermissionsForRoles === "function"
+)?.[0] || findByProps("computePermissions", "can", "computePermissionsForRoles");
 
-const styles = stylesheet.createThemedStyleSheet({
-    permContainer: {
-        marginTop: 12,
-        padding: 10,
-        borderRadius: 8,
-        backgroundColor: semanticColors.BACKGROUND_SECONDARY,
-    },
-    permHeader: {
-        fontSize: 12,
-        fontWeight: "bold",
-        color: semanticColors.TEXT_MUTED,
-        marginBottom: 8,
-        textTransform: "uppercase",
-        letterSpacing: 0.5,
-    },
-    grid: {
-        flexDirection: "row",
-        flexWrap: "wrap",
-        justifyContent: "space-between",
-    },
-    permBadge: {
-        width: "48%", // Two-column grid layout
-        flexDirection: "row",
-        alignItems: "center",
-        marginVertical: 4,
-    },
-    indicator: {
-        width: 8,
-        height: 8,
-        borderRadius: 4,
-        marginRight: 6,
-    },
-    allowedDot: {
-        backgroundColor: "#23a55a", // Discord Green
-    },
-    deniedDot: {
-        backgroundColor: "#f23f43", // Discord Red
-    },
-    permName: {
-        fontSize: 13,
-        color: semanticColors.TEXT_NORMAL,
-    }
-});
+const PermConstants = findByProps("Permissions")?.Permissions;
 
-const READABLE_PERMISSIONS: Record<string, string> = {
-    "ADMINISTRATOR": "Administrator",
+// Fallback lookup labels
+const DEFAULT_LABELS_MAP = {
+    "ADMINISTRATOR": "Administrator 👑",
     "MANAGE_GUILD": "Manage Server",
     "MANAGE_ROLES": "Manage Roles",
     "MANAGE_CHANNELS": "Manage Channels",
@@ -65,105 +30,130 @@ const READABLE_PERMISSIONS: Record<string, string> = {
     "MANAGE_MESSAGES": "Manage Messages",
     "MANAGE_NICKNAMES": "Manage Nicknames",
     "MANAGE_WEBHOOKS": "Manage Webhooks",
-    "MANAGE_EMOJIS_AND_STICKERS": "Manage Emojis",
+    "MANAGE_EMOJIS_AND_STICKERS": "Manage Emojis/Stickers",
     "VIEW_AUDIT_LOG": "View Audit Log",
-    "MENTION_EVERYONE": "Mention Everyone",
+    "MENTION_EVERYONE": "Mention @everyone",
+    "SEND_MESSAGES": "Send Messages",
+    "VIEW_CHANNEL": "View Channel"
 };
 
-function computeGuildPermissions(guildId: string, userId: string) {
-    const guild = GuildStore.getGuild(guildId);
-    if (!guild) return null;
-
-    const memberPermissions = PermissionUtils.computePermissions({
-        member: GuildMemberStore.getMember(guildId, userId),
-        guild: guild
-    });
-
-    const flagConstants = PermissionUtils.Permissions; 
-    const calculatedSheet: Record<string, boolean> = {};
-
-    for (const key of Object.keys(READABLE_PERMISSIONS)) {
-        const bitmaskValue = flagConstants[key];
-        if (bitmaskValue) {
-            const hasPerm = (BigInt(memberPermissions) & BigInt(bitmaskValue)) !== 0n;
-            const isAdmin = (BigInt(memberPermissions) & BigInt(flagConstants.ADMINISTRATOR)) !== 0n;
-            calculatedSheet[key] = hasPerm || isAdmin;
-        }
-    }
-
-    return calculatedSheet;
-}
-
 /**
- * Clean inline layout component that displays permissions as a 2-column grid
+ * Iterates through active permissions maps by resolving dynamic structural constants safely
  */
-function InlinePermissionsGrid({ userId }: { userId: string }) {
-    const activeGuildId = SelectedGuildStore.getGuildId();
-    if (!activeGuildId) return null;
-
-    const permissions = computeGuildPermissions(activeGuildId, userId);
-    if (!permissions) return null;
-
-    return (
-        <RN.View style={styles.permContainer}>
-            <RN.Text style={styles.permHeader}>Server Permissions</RN.Text>
-            <RN.View style={styles.grid}>
-                {Object.entries(READABLE_PERMISSIONS).map(([apiKey, readableLabel]) => {
-                    const isAllowed = permissions[apiKey] ?? false;
-                    return (
-                        <RN.View style={styles.permBadge} key={apiKey}>
-                            <RN.View style={[styles.indicator, isAllowed ? styles.allowedDot : styles.deniedDot]} />
-                            <RN.Text style={styles.permName} numberOfLines={1}>{readableLabel}</RN.Text>
-                        </RN.View>
-                    );
-                })}
-            </RN.View>
-        </RN.View>
-    );
+function getUserPermissions(guildId, userId) {
+    try {
+        const guild = GuildStore?.getGuild(guildId);
+        const member = GuildMemberStore?.getMember(guildId, userId);
+        
+        if (!guild || !member) return [];
+        
+        let permsBigInt;
+        
+        if (PermsModule?.computePermissions) {
+            permsBigInt = PermsModule.computePermissions({ member, guild });
+        } else if (PermsModule?.computePermissionsForRoles && ChannelStore && SelectedChannelStore) {
+            const roles = member.roles || [];
+            const channel = ChannelStore.getChannel(SelectedChannelStore.getChannelId());
+            const overwrites = channel?.permissionOverwrites_ ? Object.values(channel.permissionOverwrites_) : [];
+            permsBigInt = PermsModule.computePermissionsForRoles(roles, overwrites, guild.id);
+        } else {
+            return [];
+        }
+        
+        const activePermissions = [];
+        const bigIntMap = BigInt(permsBigInt);
+        const isAdmin = PermConstants?.ADMINISTRATOR ? (bigIntMap & BigInt(PermConstants.ADMINISTRATOR)) !== 0n : false;
+        
+        // Loop through our core labels layout configuration safely
+        for (const [apiKey, readableName] of Object.entries(DEFAULT_LABELS_MAP)) {
+            const flagValue = PermConstants?.[apiKey];
+            if (flagValue) {
+                const hasPerm = (bigIntMap & BigInt(flagValue)) !== 0n;
+                if (isAdmin || hasPerm) {
+                    activePermissions.push(readableName);
+                }
+            }
+        }
+        
+        return [...new Set(activePermissions)];
+    } catch (e) {
+        console.error("[PermViewer] Error resolving mask calculations:", e);
+        return [];
+    }
 }
 
-let unpatchProfileSection: (() => void) | null = null;
+function PermissionsSection({ userId, guildId }) {
+    const [permissions, setPermissions] = React.useState([]);
+    
+    React.useEffect(() => {
+        setPermissions(getUserPermissions(guildId, userId));
+    }, [userId, guildId]);
+    
+    if (permissions.length === 0) return null;
+    
+    return React.createElement("View", {
+        style: {
+            padding: 12,
+            marginTop: 8,
+            backgroundColor: "rgba(0,0,0,0.3)",
+            borderRadius: 8
+        }
+    }, [
+        React.createElement("Text", {
+            style: { color: "#fff", fontWeight: "bold", marginBottom: 8 }
+        }, `⚙️ Permissions (${permissions.length})`),
+        React.createElement("ScrollView", {
+            style: { maxHeight: 150 },
+            nestedScrollEnabled: true
+        }, permissions.map(p => 
+            React.createElement("Text", {
+                key: p,
+                style: { color: "#b5bac1", fontSize: 12, marginBottom: 4 }
+            }, `• ${p}`)
+        ))
+    ]);
+}
+
+let patches = [];
 
 export default {
     onLoad() {
-        if (!UserProfileSection) return;
-
-        // Determine if we patch the object directly or its underlying React render function
-        const targetComponent = typeof UserProfileSection === "object" && (UserProfileSection as any).render 
-            ? (UserProfileSection as any) 
-            : UserProfileSection;
-
-        const methodToPatch = typeof UserProfileSection === "object" && (UserProfileSection as any).render 
-            ? "render" 
-            : "default";
-
-        unpatchProfileSection = after(methodToPatch as any, targetComponent, (args: any, res: any) => {
-            // Grab props from the current section execution instance
-            const props = args[0];
-            if (!props) return res;
-
-            // Normalize the section identifier (handles string titles or structured config objects)
-            const sectionTitle = typeof props.title === "string" 
-                ? props.title.toUpperCase() 
-                : props.title?.string?.toUpperCase() || "";
-
-            // Check if this specific section instance is rendering the Roles layout
-            if (sectionTitle.includes("ROLE") && props.userId) {
-                // Return original layout but inject our inline grid right below it inside a Fragment container
-                return React.createElement(
-                    React.Fragment,
-                    null,
-                    res,
-                    React.createElement(InlinePermissionsGrid, { userId: props.userId })
+        console.log("[PermViewer] Loading target hooks...");
+        
+        // Find profile configuration modules via standard export types
+        const ProfileModule = findByProps("UserProfileModal", "UserProfile") || findByProps("UserProfileBody");
+        const UserProfileComponent = ProfileModule?.UserProfile || ProfileModule?.default;
+        
+        if (UserProfileComponent) {
+            // Changed from before to after to safely grab the native child tree structure
+            const unpatch = after("render", UserProfileComponent, ([props], responseTree) => {
+                if (!props?.userId || !responseTree) return responseTree;
+                
+                const guildId = SelectedGuildStore?.getGuildId?.();
+                if (!guildId) return responseTree;
+                
+                // Traverse down the React tree array layout looking for your view container
+                const bodyContainer = findInReactTree(responseTree, c => 
+                    c?.props?.children && Array.isArray(c.props.children)
                 );
-            }
-
-            return res;
-        });
+                
+                if (bodyContainer?.props?.children) {
+                    bodyContainer.props.children.push(
+                        React.createElement(PermissionsSection, { userId: props.userId, guildId })
+                    );
+                }
+                
+                return responseTree;
+            });
+            patches.push(unpatch);
+        }
+        
+        console.log("[PermViewer] Loaded!");
     },
-
+    
     onUnload() {
-        unpatchProfileSection?.();
-        unpatchProfileSection = null;
+        patches.forEach(p => p?.());
+        patches = [];
+        console.log("[PermViewer] Unloaded!");
     }
 };
