@@ -1,0 +1,15 @@
+{
+    "name": "viewPerms",
+    "description": "View people's global server permissions directly from their profile context menu.",
+    "authors": [
+        {
+            "name": "fshin",
+            "id": "1381008677301129257"
+        }
+    ],
+    "main": "src/index.tsx",
+    "vendetta": {
+        "icon": "ic_person_shield"
+    }
+}
+
