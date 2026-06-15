@@ -1,49 +1,57 @@
 import { findByName, findByProps, findByStoreName } from "@vendetta/metro";
-import { before, after } from "@vendetta/patcher";
+import { after } from "@vendetta/patcher";
 import { React, ReactNative as RN, stylesheet } from "@vendetta/metro/common";
-import { findInReactTree } from "@vendetta/utils";
-import { getAssetIDByName } from "@vendetta/ui/assets";
-import { showConfirmationAlert } from "@vendetta/ui/alerts";
 import { semanticColors } from "@vendetta/ui";
-
-const ActionSheet = findByProps("openLazy", "hideActionSheet");
-const { ActionSheetRow } = findByProps("ActionSheetRow");
 
 const GuildStore = findByStoreName("GuildStore");
 const SelectedGuildStore = findByStoreName("SelectedGuildStore");
 const GuildMemberStore = findByStoreName("GuildMemberStore");
 const PermissionUtils = findByProps("getGuildPermissionProps", "computePermissions");
 
-// Updated to target your exact asset dump index names
-const ShieldIcon = getAssetIDByName("ic_person_shield") ?? 
-                    getAssetIDByName("ic_shield_24px") ?? 
-                    getAssetIDByName("safety_shield");
+// Locate the section container object we discovered via eval
+const UserProfileSection = findByName("UserProfileSection", false);
 
 const styles = stylesheet.createThemedStyleSheet({
-    scrollWindow: {
-        marginVertical: 10,
-        maxHeight: RN.Dimensions.get("window").height * 0.45,
+    permContainer: {
+        marginTop: 12,
+        padding: 10,
+        borderRadius: 8,
+        backgroundColor: semanticColors.BACKGROUND_SECONDARY,
     },
-    permRow: {
+    permHeader: {
+        fontSize: 12,
+        fontWeight: "bold",
+        color: semanticColors.TEXT_MUTED,
+        marginBottom: 8,
+        textTransform: "uppercase",
+        letterSpacing: 0.5,
+    },
+    grid: {
         flexDirection: "row",
+        flexWrap: "wrap",
         justifyContent: "space-between",
+    },
+    permBadge: {
+        width: "48%", // Two-column grid layout
+        flexDirection: "row",
         alignItems: "center",
-        paddingVertical: 8,
-        borderBottomWidth: 1,
-        borderBottomColor: semanticColors.BACKGROUND_MODIFIER_ACCENT,
+        marginVertical: 4,
+    },
+    indicator: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        marginRight: 6,
+    },
+    allowedDot: {
+        backgroundColor: "#23a55a", // Discord Green
+    },
+    deniedDot: {
+        backgroundColor: "#f23f43", // Discord Red
     },
     permName: {
-        fontSize: 15,
-        fontWeight: "500",
+        fontSize: 13,
         color: semanticColors.TEXT_NORMAL,
-    },
-    allowedText: {
-        color: "#23a55a", 
-        fontWeight: "bold",
-    },
-    deniedText: {
-        color: "#f23f43", 
-        fontWeight: "bold",
     }
 });
 
@@ -57,9 +65,9 @@ const READABLE_PERMISSIONS: Record<string, string> = {
     "MANAGE_MESSAGES": "Manage Messages",
     "MANAGE_NICKNAMES": "Manage Nicknames",
     "MANAGE_WEBHOOKS": "Manage Webhooks",
-    "MANAGE_EMOJIS_AND_STICKERS": "Manage Emojis/Stickers",
+    "MANAGE_EMOJIS_AND_STICKERS": "Manage Emojis",
     "VIEW_AUDIT_LOG": "View Audit Log",
-    "MENTION_EVERYONE": "Mention @everyone",
+    "MENTION_EVERYONE": "Mention Everyone",
 };
 
 function computeGuildPermissions(guildId: string, userId: string) {
@@ -86,102 +94,76 @@ function computeGuildPermissions(guildId: string, userId: string) {
     return calculatedSheet;
 }
 
-function PermissionsListModal({ permissions }: { permissions: Record<string, boolean> }) {
+/**
+ * Clean inline layout component that displays permissions as a 2-column grid
+ */
+function InlinePermissionsGrid({ userId }: { userId: string }) {
+    const activeGuildId = SelectedGuildStore.getGuildId();
+    if (!activeGuildId) return null;
+
+    const permissions = computeGuildPermissions(activeGuildId, userId);
+    if (!permissions) return null;
+
     return (
-        <RN.ScrollView style={styles.scrollWindow} nestedScrollEnabled={true}>
-            {Object.entries(READABLE_PERMISSIONS).map(([apiKey, readableLabel]) => {
-                const isAllowed = permissions[apiKey] ?? false;
-                return (
-                    <RN.View style={styles.permRow} key={apiKey}>
-                        <RN.Text style={styles.permName}>{readableLabel}</RN.Text>
-                        <RN.Text style={isAllowed ? styles.allowedText : styles.deniedText}>
-                            {isAllowed ? "✔ ALLOWED" : "❌ DENIED"}
-                        </RN.Text>
-                    </RN.View>
-                );
-            })}
-        </RN.ScrollView>
+        <RN.View style={styles.permContainer}>
+            <RN.Text style={styles.permHeader}>Server Permissions</RN.Text>
+            <RN.View style={styles.grid}>
+                {Object.entries(READABLE_PERMISSIONS).map(([apiKey, readableLabel]) => {
+                    const isAllowed = permissions[apiKey] ?? false;
+                    return (
+                        <RN.View style={styles.permBadge} key={apiKey}>
+                            <RN.View style={[styles.indicator, isAllowed ? styles.allowedDot : styles.deniedDot]} />
+                            <RN.Text style={styles.permName} numberOfLines={1}>{readableLabel}</RN.Text>
+                        </RN.View>
+                    );
+                })}
+            </RN.View>
+        </RN.View>
     );
 }
 
-function openPermissionsAlert(userId: string, username: string) {
-    const activeGuildId = SelectedGuildStore.getGuildId();
-    if (!activeGuildId) return;
-
-    const permissions = computeGuildPermissions(activeGuildId, userId);
-    if (!permissions) return;
-
-    const alertOptions = {
-        title: `${username}'s Server Permissions`,
-        confirmText: "Close",
-        onConfirm: () => void 0,
-        children: React.createElement(PermissionsListModal, { permissions })
-    };
-
-    // @ts-expect-error - children array injects clean native container tree
-    showConfirmationAlert(alertOptions);
-}
-
-let unpatchUserActionSheet: (() => void) | null = null;
+let unpatchProfileSection: (() => void) | null = null;
 
 export default {
     onLoad() {
-        unpatchUserActionSheet = before("openLazy", ActionSheet, ([comp, args, data]) => {
-            if (args !== "UserGenericActionSheet" || !data?.user) return;
+        if (!UserProfileSection) return;
 
-            const targetUser = data.user;
+        // Determine if we patch the object directly or its underlying React render function
+        const targetComponent = typeof UserProfileSection === "object" && (UserProfileSection as any).render 
+            ? (UserProfileSection as any) 
+            : UserProfileSection;
 
-            comp.then((instance: any) => {
-                const unpatch = after("default", instance, (_: any, component: any) => {
-                    React.useEffect(() => () => { unpatch(); }, []);
+        const methodToPatch = typeof UserProfileSection === "object" && (UserProfileSection as any).render 
+            ? "render" 
+            : "default";
 
-                    const groups: any[] = findInReactTree(
-                        component,
-                        (c: any) => Array.isArray(c) && c[0]?.type?.name === "ActionSheetRowGroup"
-                    );
+        unpatchProfileSection = after(methodToPatch as any, targetComponent, (args: any, res: any) => {
+            // Grab props from the current section execution instance
+            const props = args[0];
+            if (!props) return res;
 
-                    if (!groups?.length) return;
+            // Normalize the section identifier (handles string titles or structured config objects)
+            const sectionTitle = typeof props.title === "string" 
+                ? props.title.toUpperCase() 
+                : props.title?.string?.toUpperCase() || "";
 
-                    const viewPermsButton = React.createElement(ActionSheetRow, {
-                        label: "View Server Permissions",
-                        icon: React.createElement(ActionSheetRow.Icon, {
-                            source: ShieldIcon,
-                        }),
-                        onPress: () => {
-                            ActionSheet.hideActionSheet();
-                            setTimeout(() => {
-                                openPermissionsAlert(targetUser.id, targetUser.username);
-                            }, 150);
-                        },
-                    });
+            // Check if this specific section instance is rendering the Roles layout
+            if (sectionTitle.includes("ROLE") && props.userId) {
+                // Return original layout but inject our inline grid right below it inside a Fragment container
+                return React.createElement(
+                    React.Fragment,
+                    null,
+                    res,
+                    React.createElement(InlinePermissionsGrid, { userId: props.userId })
+                );
+            }
 
-                    let inserted = false;
-                    for (let gi = 0; gi < groups.length; gi++) {
-                        const groupChildren: any[] = findInReactTree(
-                            groups[gi],
-                            (c: any) => Array.isArray(c) && c.some((child: any) =>
-                                child?.type?.name === "ActionSheetRow"
-                            )
-                        );
-                        if (!groupChildren) continue;
-
-                        groupChildren.unshift(viewPermsButton);
-                        inserted = true;
-                        break;
-                    }
-
-                    if (!inserted) {
-                        groups.unshift(
-                            React.createElement(ActionSheetRow.Group, null, viewPermsButton)
-                        );
-                    }
-                });
-            });
+            return res;
         });
     },
 
     onUnload() {
-        unpatchUserActionSheet?.();
-        unpatchUserActionSheet = null;
-    },
+        unpatchProfileSection?.();
+        unpatchProfileSection = null;
+    }
 };
