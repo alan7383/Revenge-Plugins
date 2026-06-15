@@ -1,6 +1,6 @@
 // Permission Viewer Plugin for Revenge/Bunny
-import { findByStoreName, findByProps, findAllExports } from "@vendetta/metro";
-import { after } from "@vendetta/patcher";
+import { findByStoreName, findByProps } from "@vendetta/metro";
+import { before } from "@vendetta/patcher";
 import { React } from "@vendetta/metro/common";
 import { findInReactTree } from "@vendetta/utils";
 
@@ -8,38 +8,63 @@ const GuildStore = findByStoreName("GuildStore");
 const GuildMemberStore = findByStoreName("GuildMemberStore");
 const ChannelStore = findByStoreName("ChannelStore");
 const SelectedChannelStore = findByStoreName("SelectedChannelStore");
-const SelectedGuildStore = findByStoreName("SelectedGuildStore") || findByProps("getGuildId");
+const UserStore = findByStoreName("UserStore");
 
-// Resolve core permission utility structures securely
-const PermsModule = findAllExports(
+// Get the permissions module (from your discovery)
+const PermsModule = bunny?.metro?.findAllExports?.(
     m => typeof m?.computePermissions === "function" &&
          typeof m?.can === "function" &&
          typeof m?.computePermissionsForRoles === "function"
 )?.[0] || findByProps("computePermissions", "can", "computePermissionsForRoles");
 
+// Get permission flags
 const PermConstants = findByProps("Permissions")?.Permissions;
 
-// Fallback lookup labels
-const DEFAULT_LABELS_MAP = {
-    "ADMINISTRATOR": "Administrator 👑",
-    "MANAGE_GUILD": "Manage Server",
-    "MANAGE_ROLES": "Manage Roles",
-    "MANAGE_CHANNELS": "Manage Channels",
-    "KICK_MEMBERS": "Kick Members",
-    "BAN_MEMBERS": "Ban Members",
-    "MANAGE_MESSAGES": "Manage Messages",
-    "MANAGE_NICKNAMES": "Manage Nicknames",
-    "MANAGE_WEBHOOKS": "Manage Webhooks",
-    "MANAGE_EMOJIS_AND_STICKERS": "Manage Emojis/Stickers",
-    "VIEW_AUDIT_LOG": "View Audit Log",
-    "MENTION_EVERYONE": "Mention @everyone",
-    "SEND_MESSAGES": "Send Messages",
-    "VIEW_CHANNEL": "View Channel"
+// Human readable permission names
+const PERMISSION_NAMES = {
+    [PermConstants?.CREATE_INSTANT_INVITE]: "Create Instant Invite",
+    [PermConstants?.KICK_MEMBERS]: "Kick Members",
+    [PermConstants?.BAN_MEMBERS]: "Ban Members",
+    [PermConstants?.ADMINISTRATOR]: "Administrator 👑",
+    [PermConstants?.MANAGE_CHANNELS]: "Manage Channels",
+    [PermConstants?.MANAGE_GUILD]: "Manage Server",
+    [PermConstants?.ADD_REACTIONS]: "Add Reactions",
+    [PermConstants?.VIEW_AUDIT_LOG]: "View Audit Log",
+    [PermConstants?.PRIORITY_SPEAKER]: "Priority Speaker",
+    [PermConstants?.STREAM]: "Video",
+    [PermConstants?.VIEW_CHANNEL]: "View Channel",
+    [PermConstants?.SEND_MESSAGES]: "Send Messages",
+    [PermConstants?.SEND_TTS_MESSAGES]: "Send TTS Messages",
+    [PermConstants?.MANAGE_MESSAGES]: "Manage Messages",
+    [PermConstants?.EMBED_LINKS]: "Embed Links",
+    [PermConstants?.ATTACH_FILES]: "Attach Files",
+    [PermConstants?.READ_MESSAGE_HISTORY]: "Read Message History",
+    [PermConstants?.MENTION_EVERYONE]: "Mention @everyone",
+    [PermConstants?.USE_EXTERNAL_EMOJIS]: "Use External Emojis",
+    [PermConstants?.VIEW_GUILD_INSIGHTS]: "View Guild Insights",
+    [PermConstants?.CONNECT]: "Connect",
+    [PermConstants?.SPEAK]: "Speak",
+    [PermConstants?.MUTE_MEMBERS]: "Mute Members",
+    [PermConstants?.DEAFEN_MEMBERS]: "Deafen Members",
+    [PermConstants?.MOVE_MEMBERS]: "Move Members",
+    [PermConstants?.USE_VAD]: "Use Voice Activity",
+    [PermConstants?.CHANGE_NICKNAME]: "Change Nickname",
+    [PermConstants?.MANAGE_NICKNAMES]: "Manage Nicknames",
+    [PermConstants?.MANAGE_ROLES]: "Manage Roles",
+    [PermConstants?.MANAGE_WEBHOOKS]: "Manage Webhooks",
+    [PermConstants?.MANAGE_EMOJIS_AND_STICKERS]: "Manage Emojis/Stickers",
+    [PermConstants?.USE_APPLICATION_COMMANDS]: "Use Slash Commands",
+    [PermConstants?.REQUEST_TO_SPEAK]: "Request to Speak",
+    [PermConstants?.MANAGE_EVENTS]: "Manage Events",
+    [PermConstants?.MANAGE_THREADS]: "Manage Threads",
+    [PermConstants?.CREATE_PUBLIC_THREADS]: "Create Public Threads",
+    [PermConstants?.CREATE_PRIVATE_THREADS]: "Create Private Threads",
+    [PermConstants?.USE_EXTERNAL_STICKERS]: "Use External Stickers",
+    [PermConstants?.SEND_MESSAGES_IN_THREADS]: "Send Messages in Threads",
+    [PermConstants?.USE_EMBEDDED_ACTIVITIES]: "Use Activities",
+    [PermConstants?.MODERATE_MEMBERS]: "Timeout Members"
 };
 
-/**
- * Iterates through active permissions maps by resolving dynamic structural constants safely
- */
 function getUserPermissions(guildId, userId) {
     try {
         const guild = GuildStore?.getGuild(guildId);
@@ -47,41 +72,37 @@ function getUserPermissions(guildId, userId) {
         
         if (!guild || !member) return [];
         
+        const roles = member.roles || [];
+        const channel = ChannelStore?.getChannel(SelectedChannelStore?.getChannelId());
+        const overwrites = channel?.permissionOverwrites_ ? Object.values(channel.permissionOverwrites_) : [];
+        
         let permsBigInt;
         
-        if (PermsModule?.computePermissions) {
-            permsBigInt = PermsModule.computePermissions({ member, guild });
-        } else if (PermsModule?.computePermissionsForRoles && ChannelStore && SelectedChannelStore) {
-            const roles = member.roles || [];
-            const channel = ChannelStore.getChannel(SelectedChannelStore.getChannelId());
-            const overwrites = channel?.permissionOverwrites_ ? Object.values(channel.permissionOverwrites_) : [];
+        if (PermsModule?.computePermissionsForRoles) {
             permsBigInt = PermsModule.computePermissionsForRoles(roles, overwrites, guild.id);
+        } else if (PermsModule?.computePermissions) {
+            permsBigInt = PermsModule.computePermissions({ member, guild });
         } else {
             return [];
         }
         
-        const activePermissions = [];
-        const bigIntMap = BigInt(permsBigInt);
-        const isAdmin = PermConstants?.ADMINISTRATOR ? (bigIntMap & BigInt(PermConstants.ADMINISTRATOR)) !== 0n : false;
+        const permissions = [];
+        const isAdmin = (permsBigInt & BigInt(PermConstants?.ADMINISTRATOR || 0x8)) !== 0n;
         
-        // Loop through our core labels layout configuration safely
-        for (const [apiKey, readableName] of Object.entries(DEFAULT_LABELS_MAP)) {
-            const flagValue = PermConstants?.[apiKey];
-            if (flagValue) {
-                const hasPerm = (bigIntMap & BigInt(flagValue)) !== 0n;
-                if (isAdmin || hasPerm) {
-                    activePermissions.push(readableName);
-                }
+        for (const [bit, name] of Object.entries(PERMISSION_NAMES)) {
+            if (bit && (isAdmin || (permsBigInt & BigInt(bit)) !== 0n)) {
+                permissions.push(name);
             }
         }
         
-        return [...new Set(activePermissions)];
+        return [...new Set(permissions)];
     } catch (e) {
-        console.error("[PermViewer] Error resolving mask calculations:", e);
+        console.error("[PermViewer] Error:", e);
         return [];
     }
 }
 
+// Component to display permissions
 function PermissionsSection({ userId, guildId }) {
     const [permissions, setPermissions] = React.useState([]);
     
@@ -103,8 +124,7 @@ function PermissionsSection({ userId, guildId }) {
             style: { color: "#fff", fontWeight: "bold", marginBottom: 8 }
         }, `⚙️ Permissions (${permissions.length})`),
         React.createElement("ScrollView", {
-            style: { maxHeight: 150 },
-            nestedScrollEnabled: true
+            style: { maxHeight: 150 }
         }, permissions.map(p => 
             React.createElement("Text", {
                 key: p,
@@ -118,32 +138,29 @@ let patches = [];
 
 export default {
     onLoad() {
-        console.log("[PermViewer] Loading target hooks...");
+        console.log("[PermViewer] Loading...");
         
-        // Find profile configuration modules via standard export types
-        const ProfileModule = findByProps("UserProfileModal", "UserProfile") || findByProps("UserProfileBody");
-        const UserProfileComponent = ProfileModule?.UserProfile || ProfileModule?.default;
+        // Patch the user profile to add permissions section
+        const UserProfileComponent = findByProps("UserProfileModal", "UserProfile")?.UserProfile ||
+                                      findByProps("default", "render")?.type;
         
         if (UserProfileComponent) {
-            // Changed from before to after to safely grab the native child tree structure
-            const unpatch = after("render", UserProfileComponent, ([props], responseTree) => {
-                if (!props?.userId || !responseTree) return responseTree;
+            const unpatch = before("render", UserProfileComponent, (_, [props]) => {
+                if (!props?.userId) return;
                 
-                const guildId = SelectedGuildStore?.getGuildId?.();
-                if (!guildId) return responseTree;
+                const guildId = SelectedChannelStore?.getGuildId();
+                if (!guildId) return;
                 
-                // Traverse down the React tree array layout looking for your view container
-                const bodyContainer = findInReactTree(responseTree, c => 
-                    c?.props?.children && Array.isArray(c.props.children)
-                );
-                
-                if (bodyContainer?.props?.children) {
-                    bodyContainer.props.children.push(
-                        React.createElement(PermissionsSection, { userId: props.userId, guildId })
-                    );
+                // Find where to inject
+                const result = arguments[2]?.();
+                if (result) {
+                    const body = findInReactTree(result, c => c?.props?.children?.type === "ScrollView");
+                    if (body?.props?.children) {
+                        body.props.children.push(
+                            React.createElement(PermissionsSection, { userId: props.userId, guildId })
+                        );
+                    }
                 }
-                
-                return responseTree;
             });
             patches.push(unpatch);
         }
