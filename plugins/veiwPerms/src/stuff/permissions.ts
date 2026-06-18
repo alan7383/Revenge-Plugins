@@ -1,15 +1,15 @@
-import { findByStoreName, findByProps, findAllExports } from "@vendetta/metro";
+import { findByStoreName, findByProps } from "@vendetta/metro";
+import { byProps } from "@vendetta/metro/filters";
+import { findAllExports } from "@vendetta/metro/finders";
 
 const GuildStore = findByStoreName("GuildStore");
 const GuildMemberStore = findByStoreName("GuildMemberStore");
 const ChannelStore = findByStoreName("ChannelStore");
 const SelectedChannelStore = findByStoreName("SelectedChannelStore");
 
-const PermsModule = findAllExports(
-    m => typeof m?.computePermissions === "function" &&
-         typeof m?.can === "function" &&
-         typeof m?.computePermissionsForRoles === "function"
-)?.[0] || findByProps("computePermissions", "can", "computePermissionsForRoles");
+// Use the built-in byProps filter directly, which perfectly matches what findModule/findAllExports expects
+const PermsModule = findAllExports(byProps("computePermissions", "can", "computePermissionsForRoles"))?.[0] 
+    || findByProps("computePermissions", "can", "computePermissionsForRoles");
 
 const PermConstants = findByProps("Permissions")?.Permissions;
 
