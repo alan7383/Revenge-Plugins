@@ -1,16 +1,12 @@
 import { findByStoreName, findByProps } from "@vendetta/metro";
-import { byProps } from "@vendetta/metro/filters";
-import { findAllExports } from "@vendetta/metro/finders";
 
 const GuildStore = findByStoreName("GuildStore");
 const GuildMemberStore = findByStoreName("GuildMemberStore");
 const ChannelStore = findByStoreName("ChannelStore");
 const SelectedChannelStore = findByStoreName("SelectedChannelStore");
 
-// Use the built-in byProps filter directly, which perfectly matches what findModule/findAllExports expects
-const PermsModule = findAllExports(byProps("computePermissions", "can", "computePermissionsForRoles"))?.[0] 
-    || findByProps("computePermissions", "can", "computePermissionsForRoles");
-
+// Bypassing the broken property entirely and using direct props lookup
+const PermsModule = findByProps("computePermissions", "can", "computePermissionsForRoles");
 const PermConstants = findByProps("Permissions")?.Permissions;
 
 const LABELS_MAPPING: Record<string, string> = {
