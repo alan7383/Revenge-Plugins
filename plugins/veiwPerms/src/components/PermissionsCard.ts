@@ -1,64 +1,43 @@
-import { findByName, findByStoreName } from "@vendetta/metro";
+import { findByName } from "@vendetta/metro";
 import { React, ReactNative as RN, stylesheet } from "@vendetta/metro/common";
 import { semanticColors } from "@vendetta/ui";
 import { getUserPermissions } from "../stuff/permissions";
 
-const SelectedGuildStore = findByStoreName("SelectedGuildStore");
+const UserProfileCard = findByName("UserProfileCard") || findByName("UserProfileSection");
 
-// Lookups matched directly from your reference plugin discovery
-const SimplifiedUserProfileCard = findByName("SimplifiedUserProfileCard");
-const UserProfileSection = findByName("UserProfileSection");
-const UserProfileCard = findByName("UserProfileCard");
-
-export default function PermissionsCard({ userId, variant, style }: { userId: string; variant?: string; style?: any }) {
-    const [permissions, setPermissions] = React.useState<string[]>([]);
-    const guildId = SelectedGuildStore?.getGuildId();
-
-    React.useEffect(() => {
-        if (guildId && userId) {
-            setPermissions(getUserPermissions(guildId, userId));
-        }
-    }, [userId, guildId]);
-
-    if (!guildId || permissions.length === 0) return null;
-
+export default function PermissionViewer({ userId, guildId }: { userId: string; guildId: string }) {
     const styles = stylesheet.createThemedStyleSheet({
-        wrapper: {
+        card: {
+            backgroundColor: semanticColors.BACKGROUND_MOD_MUTED,
+            borderColor: semanticColors.BORDER_MUTED,
+            borderWidth: 1,
+            borderRadius: 10,
             padding: 12,
-            backgroundColor: semanticColors.CARD_SECONDARY_BG || "rgba(0,0,0,0.2)",
-            borderRadius: 8,
             marginTop: 8,
         },
         title: {
-            color: semanticColors.TEXT_NORMAL || "#ffffff",
+            color: semanticColors.TEXT_DEFAULT,
             fontWeight: "bold",
-            fontSize: 14,
-            marginBottom: 6,
+            marginBottom: 4,
         },
-        item: {
-            color: semanticColors.TEXT_MUTED || "#b5bac1",
-            fontSize: 13,
-            marginVertical: 2,
+        text: {
+            color: semanticColors.TEXT_MUTED,
         }
     });
 
-    const content = React.createElement(RN.View, { style: styles.wrapper }, [
-        React.createElement(RN.Text, { style: styles.title }, `⚙️ Server Permissions (${permissions.length})`),
-        React.createElement(RN.ScrollView, { style: { maxHeight: 160 }, nestedScrollEnabled: true }, 
-            permissions.map(p => React.createElement(RN.Text, { key: p, style: styles.item }, `• ${p}`))
-        )
-    ]);
+    if (!guildId || !userId) return null;
 
-    // Handle structural rendering forks dynamically based on app lifecycle build context
-    if ((variant === "simplified" || variant === "you") && SimplifiedUserProfileCard) {
-        return React.createElement(SimplifiedUserProfileCard, { title: "Permissions Engine", style }, content);
-    }
+    const permissions = getUserPermissions(guildId, userId);
+    if (permissions.length === 0) return null;
+
     if (UserProfileCard) {
-        return React.createElement(UserProfileCard, { title: "Permissions Engine", style }, content);
-    }
-    if (UserProfileSection) {
-        return React.createElement(UserProfileSection, { title: "Permissions Engine" }, content);
+        return (
+            <RN.View style={styles.card}>
+                <RN.Text style={styles.title}>Server Permissions</RN.Text>
+                <RN.Text style={styles.text}>{permissions.join(", ")}</RN.Text>
+            </RN.View>
+        );
     }
 
-    return content;
+    return null;
 }
