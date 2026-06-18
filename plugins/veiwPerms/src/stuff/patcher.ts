@@ -1,53 +1,35 @@
+import { patcher } from "@vendetta";
 import { findByName } from "@vendetta/metro";
 import { React } from "@vendetta/metro/common";
-import { after } from "@vendetta/patcher";
-import PermissionsCard from "../components/PermissionsCard";
+import PermissionViewer from "./components/PermissionViewer";
 
-const YouAboutMeCard = findByName("YouAboutMeCard", false);
-const SimplifiedUserProfileAboutMeCard = findByName("SimplifiedUserProfileAboutMeCard", false);
-const UserProfileBio = findByName("UserProfileBio", false);
-const UserProfileAboutMeCard = findByName("UserProfileAboutMeCard", false);
+let unpatches: (() => void)[] = [];
 
-export default function patcher() {
-    const patches: any[] = [];
+export function startPatches() {
+    const UserProfileAboutMeCard = findByName("UserProfileAboutMeCard", false);
+    if (!UserProfileAboutMeCard) return;
 
-    if (YouAboutMeCard) {
-        patches.push(after("default", YouAboutMeCard, ([{ userId }], ret) => 
-            React.createElement(React.Fragment, {}, [
-                React.createElement(PermissionsCard, { userId, variant: "you" }),
-                ret
-            ])
-        ));
+    const patch = patcher.after("default", UserProfileAboutMeCard, ([props], res) => {
+        if (!props?.user || !props?.guildId) return res;
+
+        // Cleanly inject our standalone React element directly into the component tree
+        res.props.children = [
+            res.props.children,
+            React.createElement(PermissionViewer, {
+                userId: props.user.id,
+                guildId: props.guildId
+            })
+        ];
+
+        return res;
+    });
+
+    if (patch) unpatches.push(patch);
+}
+
+export function stopPatches() {
+    for (const unpatch of unpatches) {
+        if (typeof unpatch === "function") unpatch();
     }
-
-    if (UserProfileAboutMeCard) {
-        patches.push(after("default", UserProfileAboutMeCard, ([{ userId, style }], ret) => 
-            React.createElement(React.Fragment, {}, [
-                React.createElement(PermissionsCard, { userId, variant: "simplified", style }),
-                ret
-            ])
-        ));
-    }
-
-    if (SimplifiedUserProfileAboutMeCard) {
-        patches.push(after("default", SimplifiedUserProfileAboutMeCard, ([{ userId, style }], ret) => 
-            React.createElement(React.Fragment, {}, [
-                React.createElement(PermissionsCard, { userId, variant: "simplified", style }),
-                ret
-            ])
-        ));
-    }
-
-    if (UserProfileBio) {
-        patches.push(after("default", UserProfileBio, ([{ displayProfile }], ret) => 
-            displayProfile ? React.createElement(React.Fragment, {}, [
-                React.createElement(PermissionsCard, { userId: displayProfile.userId, variant: "classic" }),
-                ret
-            ]) : ret
-        ));
-    }
-
-    return () => {
-        for (const unpatch of patches) unpatch();
-    };
+    unpatches = [];
 }
