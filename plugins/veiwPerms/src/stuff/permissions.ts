@@ -5,7 +5,6 @@ const GuildMemberStore = findByStoreName("GuildMemberStore");
 const ChannelStore = findByStoreName("ChannelStore");
 const SelectedChannelStore = findByStoreName("SelectedChannelStore");
 
-// Bypassing the broken property entirely and using direct props lookup
 const PermsModule = findByProps("computePermissions", "can", "computePermissionsForRoles");
 const PermConstants = findByProps("Permissions")?.Permissions;
 
@@ -60,7 +59,7 @@ export function getUserPermissions(guildId: string, userId: string): string[] {
 
         return [...new Set(calculatedFlags)];
     } catch (e) {
-        console.error("[PermViewer] Error evaluating permissions bitmask:", e);
+        console.error("[PermViewer] Error calculating bitmask:", e);
         return [];
     }
 }
