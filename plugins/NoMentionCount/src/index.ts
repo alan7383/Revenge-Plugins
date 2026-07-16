@@ -3,7 +3,6 @@ import { after } from "@vendetta/patcher";
 import { storage } from "@vendetta/plugin";
 import Settings from "./settings";
 
-// Safely initialize arrays in storage if they don't exist
 if (!storage.hiddenChannelIds) storage.hiddenChannelIds = [];
 if (!storage.hiddenGuildIds) storage.hiddenGuildIds = [];
 
@@ -11,18 +10,30 @@ let patches = [];
 
 export default {
   onLoad() {
-    // Locate the module containing getMentionCount
+    // 1. Channel / Direct Mention Store
     const MentionStore = findByProps("getMentionCount");
+    
+    // 2. Server/Guild Badge Stores (Where Discord aggregates counts for the server list)
+    const GuildMentionStore = findByProps("getTotalMentionCount"); 
 
+    // Patch channel mentions
     if (MentionStore) {
-      // Patch 'getMentionCount'
       patches.push(
         after("getMentionCount", MentionStore, ([id], returnValue) => {
-          // If the ID matches a hidden channel or guild ID, override return value to 0
-          if (
-            storage.hiddenChannelIds.includes(id) || 
-            storage.hiddenGuildIds.includes(id)
-          ) {
+          if (storage.hiddenChannelIds.includes(id) || storage.hiddenGuildIds.includes(id)) {
+            return 0;
+          }
+          return returnValue;
+        })
+      );
+    }
+
+    // Patch server list badges
+    if (GuildMentionStore) {
+      // Discord uses getTotalMentionCount(guildId) for the server icon badge
+      patches.push(
+        after("getTotalMentionCount", GuildMentionStore, ([guildId], returnValue) => {
+          if (storage.hiddenGuildIds.includes(guildId)) {
             return 0;
           }
           return returnValue;
@@ -32,10 +43,10 @@ export default {
   },
 
   onUnload() {
-    // Clean up patches when unloading the plugin
     for (const unpatch of patches) {
       unpatch();
     }
+    patches = [];
   },
 
   settings: Settings,
