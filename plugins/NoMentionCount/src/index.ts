@@ -1,10 +1,9 @@
-import { findByProps, findByStoreName } from "@metro";
+import { findByProps, findByStoreName } from "@Vendetta/metro";
 import { storage } from "@vendetta/plugin";
 import Settings from "./settings";
 
 const { getMentionCount } = findByProps("getMentionCount");
 const ChannelStore = findByStoreName("ChannelStore");
-const GuildStore = findByStoreName("GuildStore");
 
 // Initialize storage
 storage.hiddenChannels ??= [];
@@ -22,12 +21,12 @@ function patchGetMentionCount() {
         const channel = ChannelStore?.getChannel(channelId);
         if (!channel) return result;
         
-        // Check if channel is in hidden guild
+        // Check if this channel's guild is in the hidden list
         if (storage.hiddenGuilds?.includes(channel.guild_id)) {
             return 0;
         }
         
-        // Check if channel is specifically hidden
+        // Check if this specific channel is in the hidden list
         if (storage.hiddenChannels?.includes(channelId)) {
             return 0;
         }
