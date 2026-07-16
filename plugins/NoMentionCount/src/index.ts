@@ -6,17 +6,14 @@ import Settings from "./settings";
 if (!storage.hiddenChannelIds) storage.hiddenChannelIds = [];
 if (!storage.hiddenGuildIds) storage.hiddenGuildIds = [];
 
-let patches = [];
+let patches: (() => void)[] = [];
 
 export default {
   onLoad() {
-    // 1. Channel / Direct Mention Store
     const MentionStore = findByProps("getMentionCount");
-    
-    // 2. Server/Guild Badge Stores (Where Discord aggregates counts for the server list)
     const GuildMentionStore = findByProps("getTotalMentionCount"); 
 
-    // Patch channel mentions
+    // Patch channel sidebar badges
     if (MentionStore) {
       patches.push(
         after("getMentionCount", MentionStore, ([id], returnValue) => {
@@ -28,9 +25,8 @@ export default {
       );
     }
 
-    // Patch server list badges
+    // Patch server list icon badges
     if (GuildMentionStore) {
-      // Discord uses getTotalMentionCount(guildId) for the server icon badge
       patches.push(
         after("getTotalMentionCount", GuildMentionStore, ([guildId], returnValue) => {
           if (storage.hiddenGuildIds.includes(guildId)) {
