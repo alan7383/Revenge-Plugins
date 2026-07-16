@@ -1,12 +1,12 @@
-import { React, ReactNative as RN } from "@metro/common";
+import { findByProps, findByStoreName } from "@vendetta/metro";
+import { React, ReactNative } from "@vendetta/metro/common";
+import { showToast } from "@vendetta/ui/toasts";
+import { getAssetIDByName } from "@vendetta/ui/assets";
 import { storage } from "@vendetta/plugin";
-import { showToast } from "@ui/toasts";
 import { useProxy } from "@vendetta/storage";
-import { getAssetIDByName } from "@ui/assets";
-import { findByProps } from "@metro";
 
 const { ScrollView } = findByProps("ScrollView");
-const { TableRowGroup, TableRow, Stack, TextInput, TableSwitchRow } = findByProps(
+const { TableRowGroup, TableRow, Stack, TextInput } = findByProps(
     "TableSwitchRow",
     "TableCheckboxRow",
     "TableRowGroup",
@@ -34,16 +34,16 @@ export default function Settings() {
             storage.hiddenChannels = [...storage.hiddenChannels, newChannelId.trim()];
             setNewChannelId("");
             forceUpdate();
-            showToast("Channel ID added", getAssetIDByName("Check"));
+            showToast("Channel added! Mention count hidden.", getAssetIDByName("Check"));
         } else {
-            showToast("Channel ID already exists", getAssetIDByName("Warning"));
+            showToast("Channel already in list", getAssetIDByName("Warning"));
         }
     };
 
     const removeChannelId = (channelId: string) => {
         storage.hiddenChannels = storage.hiddenChannels.filter((id: string) => id !== channelId);
         forceUpdate();
-        showToast("Channel ID removed", getAssetIDByName("Check"));
+        showToast("Channel removed", getAssetIDByName("Check"));
     };
 
     const addGuildId = () => {
@@ -55,30 +55,30 @@ export default function Settings() {
             storage.hiddenGuilds = [...storage.hiddenGuilds, newGuildId.trim()];
             setNewGuildId("");
             forceUpdate();
-            showToast("Server ID added", getAssetIDByName("Check"));
+            showToast("Server added! All channel mention counts hidden.", getAssetIDByName("Check"));
         } else {
-            showToast("Server ID already exists", getAssetIDByName("Warning"));
+            showToast("Server already in list", getAssetIDByName("Warning"));
         }
     };
 
     const removeGuildId = (guildId: string) => {
         storage.hiddenGuilds = storage.hiddenGuilds.filter((id: string) => id !== guildId);
         forceUpdate();
-        showToast("Server ID removed", getAssetIDByName("Check"));
+        showToast("Server removed", getAssetIDByName("Check"));
     };
 
     return (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 10 }}>
             <Stack spacing={8}>
-                <TableRowGroup title="Mention Count Hider">
+                <TableRowGroup title="Mention Hider">
                     <TableRow
                         label="What is this?"
-                        subLabel="Hide mention counts (pings) for selected channels and servers"
+                        subLabel="Hide the red mention count (ping number) on channels and servers"
                     />
                 </TableRowGroup>
 
                 {/* Channel Section */}
-                <TableRowGroup title="Add Channel ID">
+                <TableRowGroup title="Add Channel">
                     <Stack spacing={4}>
                         <TextInput
                             placeholder="Enter channel ID"
@@ -89,12 +89,9 @@ export default function Settings() {
                             returnKeyType="done"
                         />
                     </Stack>
-                </TableRowGroup>
-
-                <TableRowGroup>
                     <TableRow
-                        label="Add Channel ID"
-                        subLabel="Hide mention counts in this channel"
+                        label="Add Channel"
+                        subLabel="Hide mention count for this specific channel"
                         trailing={<TableRow.Arrow />}
                         onPress={addChannelId}
                     />
@@ -120,7 +117,7 @@ export default function Settings() {
                 )}
 
                 {/* Guild Section */}
-                <TableRowGroup title="Add Server ID">
+                <TableRowGroup title="Add Server">
                     <Stack spacing={4}>
                         <TextInput
                             placeholder="Enter server ID"
@@ -131,11 +128,8 @@ export default function Settings() {
                             returnKeyType="done"
                         />
                     </Stack>
-                </TableRowGroup>
-
-                <TableRowGroup>
                     <TableRow
-                        label="Add Server ID"
+                        label="Add Server"
                         subLabel="Hide mention counts in ALL channels of this server"
                         trailing={<TableRow.Arrow />}
                         onPress={addGuildId}
