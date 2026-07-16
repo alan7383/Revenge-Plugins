@@ -16,8 +16,32 @@ export default {
     const GuildReadStateStore = findByStoreName("GuildReadStateStore") || findByProps("getMentionCount", "getGuildUnreadMentionCount");
     const ReadStateStore = findByStoreName("ReadStateStore") || findByProps("getAllReadStates");
     const UnreadsStore = findByProps("getUnreadCount") || findByProps("hasUnread");
+    
+    // Folder Store found in our evaluation!
+    const FolderStore = findByProps("getGuildFolders");
 
-    // 1. Channel Mentions
+    // 1. Patch Folder Guild Lists (Prevents hidden servers from bloating folder badges)
+    if (FolderStore && FolderStore.getGuildFolders) {
+      patches.push(
+        after("getGuildFolders", FolderStore, (args, returnValue) => {
+          if (returnValue && Array.isArray(returnValue)) {
+            return returnValue.map(folder => {
+              const guildIds = folder.guildIds || [];
+              const cleanedGuildIds = guildIds.filter(
+                id => !storage.hiddenGuildIds.includes(id)
+              );
+              return {
+                ...folder,
+                guildIds: cleanedGuildIds
+              };
+            });
+          }
+          return returnValue;
+        })
+      );
+    }
+
+    // 2. Channel Mentions
     if (MentionStore) {
       patches.push(
         after("getMentionCount", MentionStore, ([id], returnValue) => {
@@ -29,7 +53,7 @@ export default {
       );
     }
 
-    // 2. Guild / Server Mention Aggregates
+    // 3. Guild / Server Mention Aggregates
     if (GuildMentionStore) {
       const methodsToPatch = [
         "getTotalMentionCount", 
@@ -51,7 +75,7 @@ export default {
       }
     }
 
-    // 3. Guild Read State Store (The secret culprit for Guild List Badges)
+    // 4. Guild Read State Store
     if (GuildReadStateStore) {
       const guildMethods = [
         "getMentionCount",
@@ -66,7 +90,6 @@ export default {
           patches.push(
             after(method, GuildReadStateStore, ([guildId], returnValue) => {
               if (storage.hiddenGuildIds.includes(guildId)) {
-                // Return false for unreads, 0 for numeric counts
                 return method === "hasUnread" ? false : 0;
               }
               return returnValue;
@@ -76,14 +99,13 @@ export default {
       }
     }
 
-    // 4. Raw ReadStates Map Interception
+    // 5. Raw ReadStates Map Interception
     if (ReadStateStore && ReadStateStore.getAllReadStates) {
       patches.push(
         after("getAllReadStates", ReadStateStore, (args, returnValue) => {
           if (returnValue && typeof returnValue === "object") {
             const modifiedState = { ...returnValue };
 
-            // Reset channel level unreads
             for (const id of storage.hiddenChannelIds) {
               if (modifiedState[id]) {
                 modifiedState[id] = {
@@ -95,7 +117,6 @@ export default {
               }
             }
 
-            // Reset guild level unreads
             for (const id of storage.hiddenGuildIds) {
               if (modifiedState[id]) {
                 modifiedState[id] = {
@@ -114,7 +135,7 @@ export default {
       );
     }
 
-    // 5. General Unread Indicators / Dots Fallback
+    // 6. General Unread Indicators / Dots Fallback
     if (UnreadsStore) {
       if (UnreadsStore.getUnreadCount) {
         patches.push(
