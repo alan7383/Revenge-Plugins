@@ -99,7 +99,7 @@ export default function Settings() {
         <TableRowGroup title="Hide Server Mention Counts">
           <Stack spacing={4}>
             <TextInput
-              placeholder="Enter Server/Guild ID"
+              placeholder="Enter Server ID"
               value={newGuildId}
               onChange={setNewGuildId}
               isClearable
@@ -137,7 +137,7 @@ export default function Settings() {
         <TableRowGroup title="Quick Guide">
           <TableRow
             label="How to get IDs?"
-            subLabel="Go to Discord Settings → Advanced → Turn on Developer Mode. Then, right-click/long-press any channel or server and click 'Copy User/Server/Channel ID'."
+            subLabel="Go to Discord Settings → Advanced → Turn on Developer Mode. Then, long press any channel or server and click 'Server/Channel ID'."
           />
         </TableRowGroup>
 
