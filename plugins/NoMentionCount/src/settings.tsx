@@ -1,171 +1,147 @@
-import { findByProps, findByStoreName } from "@vendetta/metro";
-import { React, ReactNative } from "@vendetta/metro/common";
-import { showToast } from "@vendetta/ui/toasts";
-import { getAssetIDByName } from "@vendetta/ui/assets";
+import { React, ReactNative as RN } from "@vendetta/metro/common";
 import { storage } from "@vendetta/plugin";
+import { findByProps } from "@vendetta/metro";
+import { showToast } from "@vendetta/ui/toasts";
 import { useProxy } from "@vendetta/storage";
+import { getAssetIDByName } from "@vendetta/ui/assets";
 
 const { ScrollView } = findByProps("ScrollView");
 const { TableRowGroup, TableRow, Stack, TextInput } = findByProps(
-    "TableSwitchRow",
-    "TableCheckboxRow",
-    "TableRowGroup",
-    "Stack",
-    "TableRow"
+  "TableSwitchRow",
+  "TableCheckboxRow",
+  "TableRowGroup",
+  "Stack",
+  "TableRow"
 );
 
-// Initialize storage
-storage.hiddenChannels ??= [];
-storage.hiddenGuilds ??= [];
-
 export default function Settings() {
-    useProxy(storage);
-    const [, forceUpdate] = React.useReducer((x) => x + 1, 0);
-    
-    const [newChannelId, setNewChannelId] = React.useState("");
-    const [newGuildId, setNewGuildId] = React.useState("");
+  useProxy(storage);
+  const [, forceUpdate] = React.useReducer((x) => x + 1, 0);
+  
+  const [newChannelId, setNewChannelId] = React.useState("");
+  const [newGuildId, setNewGuildId] = React.useState("");
 
-    const addChannelId = () => {
-        if (!newChannelId.trim()) {
-            showToast("Please enter a channel ID", getAssetIDByName("Small"));
-            return;
-        }
-        if (!storage.hiddenChannels.includes(newChannelId.trim())) {
-            storage.hiddenChannels = [...storage.hiddenChannels, newChannelId.trim()];
-            setNewChannelId("");
-            forceUpdate();
-            showToast("Channel added! Mention count hidden.", getAssetIDByName("Check"));
-        } else {
-            showToast("Channel already in list", getAssetIDByName("Warning"));
-        }
-    };
+  // Ensure storage structure exists
+  storage.hiddenChannelIds ??= [];
+  storage.hiddenGuildIds ??= [];
 
-    const removeChannelId = (channelId: string) => {
-        storage.hiddenChannels = storage.hiddenChannels.filter((id: string) => id !== channelId);
-        forceUpdate();
-        showToast("Channel removed", getAssetIDByName("Check"));
-    };
+  const addItem = (id: string, type: "channel" | "guild") => {
+    const cleanId = id.trim();
+    if (!cleanId) {
+      showToast(`Please enter a ${type} ID`, getAssetIDByName("Small"));
+      return;
+    }
 
-    const addGuildId = () => {
-        if (!newGuildId.trim()) {
-            showToast("Please enter a server ID", getAssetIDByName("Small"));
-            return;
-        }
-        if (!storage.hiddenGuilds.includes(newGuildId.trim())) {
-            storage.hiddenGuilds = [...storage.hiddenGuilds, newGuildId.trim()];
-            setNewGuildId("");
-            forceUpdate();
-            showToast("Server added! All channel mention counts hidden.", getAssetIDByName("Check"));
-        } else {
-            showToast("Server already in list", getAssetIDByName("Warning"));
-        }
-    };
+    const targetList = type === "channel" ? "hiddenChannelIds" : "hiddenGuildIds";
 
-    const removeGuildId = (guildId: string) => {
-        storage.hiddenGuilds = storage.hiddenGuilds.filter((id: string) => id !== guildId);
-        forceUpdate();
-        showToast("Server removed", getAssetIDByName("Check"));
-    };
+    if (!storage[targetList].includes(cleanId)) {
+      storage[targetList] = [...storage[targetList], cleanId];
+      if (type === "channel") setNewChannelId("");
+      else setNewGuildId("");
+      
+      forceUpdate();
+      showToast(`${type === "channel" ? "Channel" : "Server"} ID hidden!`, getAssetIDByName("Check"));
+    } else {
+      showToast("ID already exists in list", getAssetIDByName("Warning"));
+    }
+  };
 
-    return (
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 10 }}>
-            <Stack spacing={8}>
-                <TableRowGroup title="Mention Hider">
-                    <TableRow
-                        label="What is this?"
-                        subLabel="Hide the red mention count (ping number) on channels and servers"
+  const removeItem = (id: string, type: "channel" | "guild") => {
+    const targetList = type === "channel" ? "hiddenChannelIds" : "hiddenGuildIds";
+    storage[targetList] = storage[targetList].filter((item: string) => item !== id);
+    forceUpdate();
+    showToast("ID removed", getAssetIDByName("Check"));
+  };
+
+  return (
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 10 }}>
+      <Stack spacing={12}>
+        
+        {/* --- SECTION: CHANNEL MENTION SHIELD --- */}
+        <TableRowGroup title="Hide Channel Mention Counts">
+          <Stack spacing={4}>
+            <TextInput
+              placeholder="Enter Channel ID"
+              value={newChannelId}
+              onChange={setNewChannelId}
+              isClearable
+              onSubmitEditing={() => addItem(newChannelId, "channel")}
+              returnKeyType="done"
+            />
+            <TableRow
+              label="Add Channel ID"
+              trailing={<TableRow.Arrow />}
+              onPress={() => addItem(newChannelId, "channel")}
+            />
+          </Stack>
+        </TableRowGroup>
+
+        {storage.hiddenChannelIds.length > 0 && (
+          <TableRowGroup title="Hidden Channels">
+            {storage.hiddenChannelIds.map((id: string, index: number) => (
+              <TableRow
+                key={index}
+                label={id}
+                trailing={
+                  <RN.TouchableOpacity onPress={() => removeItem(id, "channel")}>
+                    <RN.Image
+                      source={getAssetIDByName("TrashIcon")}
+                      style={{ width: 20, height: 20, tintColor: "#ff4d4d" }}
                     />
-                </TableRowGroup>
+                  </RN.TouchableOpacity>
+                }
+              />
+            ))}
+          </TableRowGroup>
+        )}
 
-                {/* Channel Section */}
-                <TableRowGroup title="Add Channel">
-                    <Stack spacing={4}>
-                        <TextInput
-                            placeholder="Enter channel ID"
-                            value={newChannelId}
-                            onChange={setNewChannelId}
-                            isClearable
-                            onSubmitEditing={addChannelId}
-                            returnKeyType="done"
-                        />
-                    </Stack>
-                    <TableRow
-                        label="Add Channel"
-                        subLabel="Hide mention count for this specific channel"
-                        trailing={<TableRow.Arrow />}
-                        onPress={addChannelId}
+        {/* --- SECTION: SERVER MENTION SHIELD --- */}
+        <TableRowGroup title="Hide Server Mention Counts">
+          <Stack spacing={4}>
+            <TextInput
+              placeholder="Enter Server/Guild ID"
+              value={newGuildId}
+              onChange={setNewGuildId}
+              isClearable
+              onSubmitEditing={() => addItem(newGuildId, "guild")}
+              returnKeyType="done"
+            />
+            <TableRow
+              label="Add Server ID"
+              trailing={<TableRow.Arrow />}
+              onPress={() => addItem(newGuildId, "guild")}
+            />
+          </Stack>
+        </TableRowGroup>
+
+        {storage.hiddenGuildIds.length > 0 && (
+          <TableRowGroup title="Hidden Servers">
+            {storage.hiddenGuildIds.map((id: string, index: number) => (
+              <TableRow
+                key={index}
+                label={id}
+                trailing={
+                  <RN.TouchableOpacity onPress={() => removeItem(id, "guild")}>
+                    <RN.Image
+                      source={getAssetIDByName("TrashIcon")}
+                      style={{ width: 20, height: 20, tintColor: "#ff4d4d" }}
                     />
-                </TableRowGroup>
+                  </RN.TouchableOpacity>
+                }
+              />
+            ))}
+          </TableRowGroup>
+        )}
 
-                {storage.hiddenChannels && storage.hiddenChannels.length > 0 && (
-                    <TableRowGroup title="Hidden Channels">
-                        {storage.hiddenChannels.map((channelId: string, index: number) => (
-                            <TableRow
-                                key={index}
-                                label={channelId}
-                                trailing={
-                                    <RN.TouchableOpacity onPress={() => removeChannelId(channelId)}>
-                                        <RN.Image
-                                            source={getAssetIDByName("TrashIcon")}
-                                            style={{ width: 20, height: 20, tintColor: "#ff4d4d" }}
-                                        />
-                                    </RN.TouchableOpacity>
-                                }
-                            />
-                        ))}
-                    </TableRowGroup>
-                )}
+        {/* --- INSTRUCTIONS --- */}
+        <TableRowGroup title="Quick Guide">
+          <TableRow
+            label="How to get IDs?"
+            subLabel="Go to Discord Settings → Advanced → Turn on Developer Mode. Then, right-click/long-press any channel or server and click 'Copy User/Server/Channel ID'."
+          />
+        </TableRowGroup>
 
-                {/* Guild Section */}
-                <TableRowGroup title="Add Server">
-                    <Stack spacing={4}>
-                        <TextInput
-                            placeholder="Enter server ID"
-                            value={newGuildId}
-                            onChange={setNewGuildId}
-                            isClearable
-                            onSubmitEditing={addGuildId}
-                            returnKeyType="done"
-                        />
-                    </Stack>
-                    <TableRow
-                        label="Add Server"
-                        subLabel="Hide mention counts in ALL channels of this server"
-                        trailing={<TableRow.Arrow />}
-                        onPress={addGuildId}
-                    />
-                </TableRowGroup>
-
-                {storage.hiddenGuilds && storage.hiddenGuilds.length > 0 && (
-                    <TableRowGroup title="Hidden Servers">
-                        {storage.hiddenGuilds.map((guildId: string, index: number) => (
-                            <TableRow
-                                key={index}
-                                label={guildId}
-                                trailing={
-                                    <RN.TouchableOpacity onPress={() => removeGuildId(guildId)}>
-                                        <RN.Image
-                                            source={getAssetIDByName("TrashIcon")}
-                                            style={{ width: 20, height: 20, tintColor: "#ff4d4d" }}
-                                        />
-                                    </RN.TouchableOpacity>
-                                }
-                            />
-                        ))}
-                    </TableRowGroup>
-                )}
-
-                <TableRowGroup title="How to Get IDs">
-                    <TableRow
-                        label="Channel ID"
-                        subLabel="Enable Developer Mode → right-click channel → Copy ID"
-                    />
-                    <TableRow
-                        label="Server ID"
-                        subLabel="Enable Developer Mode → right-click server name → Copy ID"
-                    />
-                </TableRowGroup>
-            </Stack>
-        </ScrollView>
-    );
+      </Stack>
+    </ScrollView>
+  );
 }
