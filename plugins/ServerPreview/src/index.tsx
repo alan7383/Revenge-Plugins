@@ -1,18 +1,15 @@
-import { findByProps, findByName } from "@vendetta/metro";
-import { React, ReactNative as RN } from "@vendetta/metro/common";
+import { findByProps } from "@vendetta/metro";
+import { React } from "@vendetta/metro/common";
 import { showToast } from "@vendetta/ui/toasts";
-import { storage } from "@vendetta/plugin";
-import { patcher } from "@vendetta"; // Use the standard patcher proxy for your platform
+import { patcher } from "@vendetta"; 
 import Settings from "./settings";
 
-// 1. Resolve your Metro dependencies
 const GuildActions = findByProps("joinGuild");
-const InviteDetailsComponent = findByName("InviteDetails", false) || findByProps("InviteDetails");
+const InviteDetailsModule = findByProps("InviteDetails") || findByProps("InviteHeader");
 
-// Re-using your core business logic methods
 function lurk(id: string) {
   if (!GuildActions?.joinGuild) {
-    showToast("Failed: joinGuild not found", "Small");
+    showToast("Failed: joinGuild module missing", "Small");
     return;
   }
   GuildActions.joinGuild(id, { lurker: true })
@@ -28,59 +25,67 @@ let unpatchInviteDetails: () => void;
 
 export default {
   onLoad() {
-    if (!InviteDetailsComponent) {
-      console.error("[Lurker] Could not find InviteDetails module context.");
+    if (!InviteDetailsModule) {
+      console.error("[Lurker] InviteDetails target binding contextual signature not found.");
       return;
     }
 
-    // 2. Intercept the render output of InviteDetails
-    unpatchInviteDetails = patcher.after("default", InviteDetailsComponent, (args, res) => {
-      // args[0] typically holds the 'invite' object passed down by AcceptInvite.tsx
+    // Intercept the default instantiation factory wrapper execution map
+    unpatchInviteDetails = patcher.after("default", InviteDetailsModule, (args, res) => {
       const inviteData = args[0]?.invite;
       if (!inviteData || !inviteData.guild) return res;
 
       const targetGuildId = inviteData.guild.id;
 
-      // 3. Navigate into the React layout tree to place your button safely
+      // Safe evaluation context boundary for looking up internal layout trees
       if (res && res.props) {
-        // Safe arrays conversion so we can comfortably use .push() or .splice()
-        res.props.children = React.Children.toArray(res.props.children);
+        let childrenContainer = res.props.children;
 
-        // 4. Build your custom UI Button Element
-        const customLurkButton = React.createElement(
-          RN.TouchableOpacity,
-          {
-            style: {
-              backgroundColor: "#23a55a", // Discord green styling variant
-              paddingVertical: 12,
-              paddingHorizontal: 16,
-              borderRadius: 4,
-              marginTop: 10,
-              alignItems: "center",
-              justifyContent: "center",
-              width: "100%",
-            },
-            onPress: () => {
-              lurk(targetGuildId);
+        // Trace standard nested layout vectors if Discord is wrapping arrays inside Fragments
+        if (childrenContainer && childrenContainer.props && Array.isArray(childrenContainer.props.children)) {
+          childrenContainer = childrenContainer.props.children;
+        }
+
+        if (Array.isArray(childrenContainer)) {
+          // Check if a Lurk button already exists in the stack to prevent memory leaks
+          const alreadyHasLurk = childrenContainer.some(
+            (child: any) => child?.props?.accessibilityLabel === "Lurk Preview Button"
+          );
+
+          if (!alreadyHasLurk) {
+            // Locate Discord's original action ButtonGroup container module dynamically inside the schema loop
+            const buttonGroupIndex = childrenContainer.findIndex(
+              (child: any) => child?.props?.children && Array.isArray(child.props.children) && child.props.children.length >= 1
+            );
+
+            // Construct replacement component map mirroring native element layouts
+            const ButtonModule = childrenContainer[buttonGroupIndex >= 0 ? buttonGroupIndex : childrenContainer.length - 1]?.props?.children?.[0]?.type;
+            
+            if (ButtonModule) {
+              const customLurkButton = React.createElement(ButtonModule, {
+                variant: "secondary", 
+                size: "lg",
+                text: "Lurk Preview",
+                accessibilityLabel: "Lurk Preview Button",
+                style: { marginTop: 8 },
+                onPress: () => lurk(targetGuildId),
+              });
+
+              // Safely splice right above/next to the primary interaction blocks depending on tree indices
+              if (buttonGroupIndex !== -1 && Array.isArray(childrenContainer[buttonGroupIndex].props.children)) {
+                childrenContainer[buttonGroupIndex].props.children.push(customLurkButton);
+              } else {
+                childrenContainer.push(customLurkButton);
+              }
             }
-          },
-          React.createElement(
-            RN.Text,
-            { style: { color: "#ffffff", fontWeight: "bold", fontSize: 16 } },
-            "Lurk Server Assets"
-          )
-        );
-
-        // 5. Append or prepend your node layout right next to the current content children tree
-        res.props.children.push(customLurkButton);
+          }
+        }
       }
-
       return res;
     });
   },
 
   onUnload() {
-    // 6. Housekeeping cleanup call on plug-out states
     if (typeof unpatchInviteDetails === "function") {
       unpatchInviteDetails();
     }
@@ -88,4 +93,3 @@ export default {
 
   settings: Settings,
 };
-
