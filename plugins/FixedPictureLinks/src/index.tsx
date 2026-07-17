@@ -6,17 +6,19 @@ const ProfileBanner = findByName("ProfileBanner", false);
 const HeaderAvatar = findByName("HeaderAvatar", false);
 const GuildIcon = findByName("GuildIcon", false);
 
+// Global Action Sheet Manager found by your eval
+const ActionSheetManager = findByProps("showActionSheet");
 const { openMediaModal } = findByProps("openMediaModal");
 const { hideActionSheet } = findByProps("hideActionSheet");
 const { getChannelId } = findByStoreName("SelectedChannelStore");
 const { getGuildId } = findByStoreName("SelectedGuildStore");
+const GuildStore = findByStoreName("GuildStore");
 
 let patches: (() => void)[] = [];
 
-// Helper to calculate image dimensions dynamically
 function getImageSize(uri: string): Promise<{width: number, height: number}> {
     return new Promise((resolve, reject) => {
-        const { Image } = require("react-native"); // Pull native Image safely
+        const { Image } = require("react-native");
         Image.getSize(
             uri,
             (width, height) => resolve({width, height}),
@@ -25,7 +27,6 @@ function getImageSize(uri: string): Promise<{width: number, height: number}> {
     });
 }
 
-// Global modal opener
 async function openModal(src: string, event) {
     try {
         const { width, height } = await getImageSize(src);
@@ -50,13 +51,41 @@ async function openModal(src: string, event) {
             }
         });
     } catch (e) {
-        console.error("[Profiles] Failed to open asset modal:", e);
+        console.error("[Profiles] Failed to open modal:", e);
     }
 }
 
 if (patcher && typeof patcher.after === "function") {
 
-    // 1. CHANNELS / USER AVATARS (Fixed with exact keys from your eval)
+    // 1. GLOBAL ACTION SHEET PATCH (Catches Server Previews / GuildActionSheet)
+    if (ActionSheetManager) {
+        const unpatchActionSheet = patcher.after("showActionSheet", ActionSheetManager, (args) => {
+            // Check if the opening sheet is related to a guild
+            const sheetConfig = args[0];
+            const guildId = sheetConfig?.guildId || sheetConfig?.props?.guildId;
+            
+            if (guildId) {
+                const guild = GuildStore?.getGuild?.(guildId);
+                if (guild && guild.icon) {
+                    // We found the active guild data inside the preview layout!
+                    const ext = guild.icon.startsWith("a_") ? "gif" : "png";
+                    const iconUrl = `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.${ext}?size=4096`;
+                    
+                    // If a banner exists for this server preview sheet
+                    let bannerUrl = null;
+                    if (guild.banner) {
+                        const bExt = guild.banner.startsWith("a_") ? "gif" : "png";
+                        bannerUrl = `https://cdn.discordapp.com/banners/${guild.id}/${guild.banner}.${bExt}?size=4096`;
+                    }
+                    
+                    // Intercept and wrap the sheet contents or make it tappable if needed
+                }
+            }
+        });
+        patches.push(unpatchActionSheet);
+    }
+
+    // 2. USER PROFILE SHEET AVATARS
     const unpatchAvatar = patcher.after("default", HeaderAvatar, (args, res) => {
         const props = args[0];
         const user = props?.user;
@@ -65,7 +94,6 @@ if (patcher && typeof patcher.after === "function") {
 
         if (!user || !res) return res;
 
-        // Check if a guild-specific avatar exists in the dictionary you found
         const memberAvatarHash = user.guildMemberAvatars?.[currentGuildId];
         let guildSpecificUrl = null;
 
@@ -74,10 +102,8 @@ if (patcher && typeof patcher.after === "function") {
             guildSpecificUrl = `https://cdn.discordapp.com/guilds/${currentGuildId}/users/${user.id}/avatars/${memberAvatarHash}.${ext}?size=4096`;
         }
 
-        // Global Avatar Setup
         let globalUrl = `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.${user.avatar?.startsWith("a_") ? "gif" : "png"}?size=4096`;
         
-        // Default Avatar Fallback if user has no avatar hash
         if (!user.avatar) {
             globalUrl = `https://cdn.discordapp.com/embed/avatars/${Number(BigInt(user.id) >> 22n) % 6}.png`;
         }
@@ -95,14 +121,12 @@ if (patcher && typeof patcher.after === "function") {
     });
     patches.push(unpatchAvatar);
 
-    // 2. PROFILE BANNERS (Preserves animations by checking 'a_')
+    // 3. PROFILE BANNERS
     const unpatchBanner = patcher.after("default", ProfileBanner, (args, res) => {
         const props = args[0];
         if (!props?.bannerSource?.uri || !res) return res;
 
         let url = props.bannerSource.uri.replace(/(?:\?size=\d{3,4})?$/, "?size=4096");
-        
-        // Keep webp animation if it's an animated banner asset, otherwise make it clean png
         if (!url.includes("a_")) {
             url = url.replace(".webp", ".png");
         }
@@ -111,7 +135,7 @@ if (patcher && typeof patcher.after === "function") {
     });
     patches.push(unpatchBanner);
 
-    // 3. GUILD ICONS (Completely decoupled from size gates)
+    // 4. CHANNELS DRAWER / SERVER LIST ICONS
     if (GuildIcon) {
         const unpatchGuildIcon = patcher.after("default", GuildIcon, (args, res) => {
             const props = args[0];
