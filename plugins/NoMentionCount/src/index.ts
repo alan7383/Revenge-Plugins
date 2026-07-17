@@ -11,10 +11,6 @@ if (!storage.whitelistedUserIds) storage.whitelistedUserIds = [];
 
 let patches: (() => void)[] = [];
 
-// In-memory sets to track channels/guilds that currently have active whitelisted pings
-const activeWhitelistChannels = new Set<string>();
-const activeWhitelistGuilds = new Set<string>();
-
 export default {
   onLoad() {
     const MentionStore = findByProps("getMentionCount");
@@ -24,49 +20,53 @@ export default {
     const UnreadsStore = findByProps("getUnreadCount") || findByProps("hasUnread");
     const FolderStore = findByProps("getGuildFolders");
     const Dispatcher = findByProps("dispatch", "subscribe");
+    
+    // Discord's message internal cache store to verify who actually pinged
+    const MessageStore = findByProps("getMessages");
+    const ChannelStore = findByProps("getChannel", "getChannels");
 
-    // 1. Dispatch Interceptor (Manages blacklists, whitelists, and clears dynamic states)
+    // Helper: Checks if a specific channel has a pending ping from any whitelisted user
+    const hasWhitelistedPingInChannel = (channelId: string): boolean => {
+      if (storage.whitelistedUserIds.length === 0 || !MessageStore) return false;
+      
+      const cachedMessages = MessageStore.getMessages(channelId);
+      if (!cachedMessages || !cachedMessages._array) return false;
+
+      // Scan cached messages in the channel to see if a whitelisted user pinged you
+      return cachedMessages._array.some((msg: any) => 
+        msg.mentioned && storage.whitelistedUserIds.includes(msg.author?.id)
+      );
+    };
+
+    // Helper: Checks if a server contains ANY channel with a whitelisted ping
+    const hasWhitelistedPingInGuild = (guildId: string): boolean => {
+      if (!ChannelStore || !guildId) return false;
+      
+      const channels = ChannelStore.getChannels ? ChannelStore.getChannels(guildId) : [];
+      const channelList = Array.isArray(channels) ? channels : Object.values(channels);
+
+      return channelList.some((ch: any) => ch && hasWhitelistedPingInChannel(ch.id));
+    };
+
+    // 1. Raw Dispatch Interceptor (Globally strips blocked users)
     if (Dispatcher && typeof Dispatcher.addInterceptor === "function") {
       const cancelInterceptor = Dispatcher.addInterceptor((event) => {
-        // Track new incoming pings
         if (event.type === "MESSAGE_CREATE") {
           const message = event.message;
           const authorId = message?.author?.id;
-          const channelId = message?.channel_id;
-          const guildId = event.guildId;
 
-          if (!authorId) return false;
-
-          // RULE A: Globally block user if they are on the hidden user list
-          if (storage.hiddenUserIds.includes(authorId)) {
+          if (authorId && storage.hiddenUserIds.includes(authorId)) {
             message.mentioned = false;
             message.mentionEveryone = false;
-            if (Array.isArray(message.mentions)) {
-              message.mentions = [];
-            }
-            return false;
-          }
-
-          // RULE B: If a whitelisted user pings you, mark their location as an active bypass exception
-          if (message.mentioned && storage.whitelistedUserIds.includes(authorId)) {
-            if (channelId) activeWhitelistChannels.add(channelId);
-            if (guildId) activeWhitelistGuilds.add(guildId);
+            if (Array.isArray(message.mentions)) message.mentions = [];
           }
         }
-
-        // Clean up tracking when you read the channel or mark it read
-        if (event.type === "CHANNEL_SELECT" || event.type === "MARK_CHANNEL_READ") {
-          if (event.channelId) activeWhitelistChannels.delete(event.channelId);
-          if (event.guildId) activeWhitelistGuilds.delete(event.guildId);
-        }
-
         return false;
       });
-
       patches.push(cancelInterceptor);
     }
 
-    // 2. Folder Guild List Filtering (Exempts folder filtering if a whitelist ping is active)
+    // 2. Folder Guild List Filtering
     if (FolderStore && FolderStore.getGuildFolders) {
       patches.push(
         after("getGuildFolders", FolderStore, (args, returnValue) => {
@@ -74,8 +74,7 @@ export default {
             return returnValue.map(folder => {
               const guildIds = folder.guildIds || [];
               const cleanedGuildIds = guildIds.filter(id => {
-                // If the server has an active whitelist ping, don't hide it from folder calculations
-                if (activeWhitelistGuilds.has(id)) return true;
+                if (hasWhitelistedPingInGuild(id)) return true; // Bypass
                 return !storage.hiddenGuildIds.includes(id);
               });
               return { ...folder, guildIds: cleanedGuildIds };
@@ -90,8 +89,7 @@ export default {
     if (MentionStore) {
       patches.push(
         after("getMentionCount", MentionStore, ([id], returnValue) => {
-          // If this channel has an active whitelist ping bypass, let the true mention count pass
-          if (activeWhitelistChannels.has(id)) return returnValue;
+          if (hasWhitelistedPingInChannel(id)) return returnValue;
 
           if (storage.hiddenChannelIds.includes(id) || storage.hiddenGuildIds.includes(id)) {
             return 0;
@@ -108,7 +106,7 @@ export default {
         if (typeof GuildMentionStore[method] === "function") {
           patches.push(
             after(method, GuildMentionStore, ([guildId], returnValue) => {
-              if (activeWhitelistGuilds.has(guildId)) return returnValue;
+              if (hasWhitelistedPingInGuild(guildId)) return returnValue;
 
               if (storage.hiddenGuildIds.includes(guildId)) {
                 return 0;
@@ -127,7 +125,7 @@ export default {
         if (typeof GuildReadStateStore[method] === "function") {
           patches.push(
             after(method, GuildReadStateStore, ([guildId], returnValue) => {
-              if (activeWhitelistGuilds.has(guildId)) return returnValue;
+              if (hasWhitelistedPingInGuild(guildId)) return returnValue;
 
               if (storage.hiddenGuildIds.includes(guildId)) {
                 return method === "hasUnread" ? false : 0;
@@ -147,13 +145,13 @@ export default {
             const modifiedState = { ...returnValue };
 
             for (const id of storage.hiddenChannelIds) {
-              if (modifiedState[id] && !activeWhitelistChannels.has(id)) {
+              if (modifiedState[id] && !hasWhitelistedPingInChannel(id)) {
                 modifiedState[id] = { ...modifiedState[id], mentionCount: 0, _unreadCount: 0, unreadCount: 0 };
               }
             }
 
             for (const id of storage.hiddenGuildIds) {
-              if (modifiedState[id] && !activeWhitelistGuilds.has(id)) {
+              if (modifiedState[id] && !hasWhitelistedPingInGuild(id)) {
                 modifiedState[id] = { ...modifiedState[id], mentionCount: 0, _unreadCount: 0, unreadCount: 0 };
               }
             }
@@ -170,7 +168,7 @@ export default {
       if (UnreadsStore.getUnreadCount) {
         patches.push(
           after("getUnreadCount", UnreadsStore, ([id], returnValue) => {
-            if (activeWhitelistChannels.has(id) || activeWhitelistGuilds.has(id)) return returnValue;
+            if (hasWhitelistedPingInChannel(id) || hasWhitelistedPingInGuild(id)) return returnValue;
 
             if (storage.hiddenChannelIds.includes(id) || storage.hiddenGuildIds.includes(id)) {
               return 0;
@@ -182,7 +180,7 @@ export default {
       if (UnreadsStore.hasUnread) {
         patches.push(
           after("hasUnread", UnreadsStore, ([id], returnValue) => {
-            if (activeWhitelistChannels.has(id) || activeWhitelistGuilds.has(id)) return returnValue;
+            if (hasWhitelistedPingInChannel(id) || hasWhitelistedPingInGuild(id)) return returnValue;
 
             if (storage.hiddenChannelIds.includes(id) || storage.hiddenGuildIds.includes(id)) {
               return false;
@@ -199,8 +197,6 @@ export default {
       unpatch();
     }
     patches = [];
-    activeWhitelistChannels.clear();
-    activeWhitelistGuilds.clear();
   },
 
   settings: Settings,
