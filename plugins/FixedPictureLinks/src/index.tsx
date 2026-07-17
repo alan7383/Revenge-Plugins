@@ -1,6 +1,5 @@
-import { findByProps, findByName, findByStoreName } from "@vendetta/metro";
-import { after } from "@vendetta/patcher";
-import { ReactNative } from "@vendetta/metro/common";
+const { findByName, findByProps, findByStoreName } = bunny.metro;
+const patcher = bunny.api?.patcher || bunny.metro?.patcher;
 
 const { Pressable } = findByProps("Button", "Text", "View");
 const ProfileBanner = findByName("ProfileBanner", false);
@@ -14,9 +13,11 @@ const { getGuildId } = findByStoreName("SelectedGuildStore");
 
 let patches: (() => void)[] = [];
 
+// Helper to calculate image dimensions dynamically
 function getImageSize(uri: string): Promise<{width: number, height: number}> {
     return new Promise((resolve, reject) => {
-        ReactNative.Image.getSize(
+        const { Image } = require("react-native"); // Pull native Image safely
+        Image.getSize(
             uri,
             (width, height) => resolve({width, height}),
             (error) => reject(error)
@@ -24,87 +25,110 @@ function getImageSize(uri: string): Promise<{width: number, height: number}> {
     });
 }
 
+// Global modal opener
 async function openModal(src: string, event) {
-    const { width, height } = await getImageSize(src);
-
-    hideActionSheet(); // hide user sheets/menus safely
-    openMediaModal({
-        initialSources: [{
-            uri: src,
-            sourceURI: src,
-            width,
-            height,
-            guildId: getGuildId(),
-            channelId: getChannelId(),
-        }],
-        initialIndex: 0,
-        originLayout: {
-            width: 0, 
-            height: 0,
-            x: event.pageX,
-            y: event.pageY,
-            resizeMode: "fill",
-        }
-    });
+    try {
+        const { width, height } = await getImageSize(src);
+        hideActionSheet?.(); 
+        
+        openMediaModal({
+            initialSources: [{
+                uri: src,
+                sourceURI: src,
+                width,
+                height,
+                guildId: getGuildId?.(),
+                channelId: getChannelId?.(),
+            }],
+            initialIndex: 0,
+            originLayout: {
+                width: 0, 
+                height: 0,
+                x: event.nativeEvent?.pageX || 0,
+                y: event.nativeEvent?.pageY || 0,
+                resizeMode: "fill",
+            }
+        });
+    } catch (e) {
+        console.error("[Profiles] Failed to open asset modal:", e);
+    }
 }
 
-// 1. User Avatar Patching
-const unpatchAvatar = after("default", HeaderAvatar, ([{ user, style, guildId }], res) => {
-    var ext = "png";
-    if (typeof user.guildMemberAvatars?.[guildId] === "string") {
-        if (user.guildMemberAvatars?.[guildId].includes("a_")) { ext = "gif"; }
-    }
-    const guildSpecific = user.guildMemberAvatars?.[guildId] && `https://cdn.discordapp.com/guilds/${guildId}/users/${user.id}/avatars/${user.guildMemberAvatars[guildId]}.${ext}?size=4096`;
-    const image = user?.getAvatarURL?.(false, 4096, true);
-    if (!image) return res;
+if (patcher && typeof patcher.after === "function") {
 
-    const url =
-        typeof image === "number"
-            ? `https://cdn.discordapp.com/embed/avatars/${Number(BigInt(user.id) >> 22n) % 6}.png`
-            : image?.replace(".webp", ".png");
+    // 1. CHANNELS / USER AVATARS (Fixed with exact keys from your eval)
+    const unpatchAvatar = patcher.after("default", HeaderAvatar, (args, res) => {
+        const props = args[0];
+        const user = props?.user;
+        const style = props?.style;
+        const currentGuildId = props?.guildId || getGuildId?.();
 
-    delete res.props.style;
+        if (!user || !res) return res;
 
-    return (
-        <Pressable
-            onPress={({ nativeEvent }) => openModal(url, nativeEvent)}
-            onLongPress={({ nativeEvent }) => guildSpecific && openModal(guildSpecific, nativeEvent)}
-            style={style}>
-            {res}
-        </Pressable>
-    );
-});
-patches.push(unpatchAvatar);
+        // Check if a guild-specific avatar exists in the dictionary you found
+        const memberAvatarHash = user.guildMemberAvatars?.[currentGuildId];
+        let guildSpecificUrl = null;
 
-// 2. Profile Banner Patching
-const unpatchBanner = after("default", ProfileBanner, ([{ bannerSource }], res) => {
-    if (typeof bannerSource?.uri !== "string" || !res) return res;
+        if (memberAvatarHash) {
+            const ext = memberAvatarHash.startsWith("a_") ? "gif" : "png";
+            guildSpecificUrl = `https://cdn.discordapp.com/guilds/${currentGuildId}/users/${user.id}/avatars/${memberAvatarHash}.${ext}?size=4096`;
+        }
 
-    const url = bannerSource.uri
-        .replace(/(?:\?size=\d{3,4})?$/, "?size=4096")
-        .replace(".webp", ".png");
+        // Global Avatar Setup
+        let globalUrl = `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.${user.avatar?.startsWith("a_") ? "gif" : "png"}?size=4096`;
+        
+        // Default Avatar Fallback if user has no avatar hash
+        if (!user.avatar) {
+            globalUrl = `https://cdn.discordapp.com/embed/avatars/${Number(BigInt(user.id) >> 22n) % 6}.png`;
+        }
 
-    return <Pressable onPress={({ nativeEvent }) => openModal(url, nativeEvent)}>{res}</Pressable>;
-});
-patches.push(unpatchBanner);
-
-// 3. Server Guild Icon Patching (Fixed and Activated)
-if (GuildIcon) {
-    const unpatchGuildIcon = after("default", GuildIcon, ([props], res) => {
-        const guild = props?.guild;
-        if (!guild || !guild.icon) return res;
-
-        let ext = "png";
-        if (guild.icon.includes("a_")) { ext = "gif"; }
-        const url = `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.${ext}?size=4096`;
+        delete res.props.style;
 
         return (
-            <Pressable onPress={({ nativeEvent }) => openModal(url, nativeEvent)}>
+            <Pressable
+                onPress={(e) => openModal(guildSpecificUrl || globalUrl, e)}
+                onLongPress={(e) => guildSpecificUrl ? openModal(globalUrl, e) : null}
+                style={style}>
                 {res}
             </Pressable>
         );
     });
-    patches.push(unpatchGuildIcon);
+    patches.push(unpatchAvatar);
+
+    // 2. PROFILE BANNERS (Preserves animations by checking 'a_')
+    const unpatchBanner = patcher.after("default", ProfileBanner, (args, res) => {
+        const props = args[0];
+        if (!props?.bannerSource?.uri || !res) return res;
+
+        let url = props.bannerSource.uri.replace(/(?:\?size=\d{3,4})?$/, "?size=4096");
+        
+        // Keep webp animation if it's an animated banner asset, otherwise make it clean png
+        if (!url.includes("a_")) {
+            url = url.replace(".webp", ".png");
+        }
+
+        return <Pressable onPress={(e) => openModal(url, e)}>{res}</Pressable>;
+    });
+    patches.push(unpatchBanner);
+
+    // 3. GUILD ICONS (Completely decoupled from size gates)
+    if (GuildIcon) {
+        const unpatchGuildIcon = patcher.after("default", GuildIcon, (args, res) => {
+            const props = args[0];
+            const guild = props?.guild;
+            if (!guild || !guild.icon || !res) return res;
+
+            const ext = guild.icon.startsWith("a_") ? "gif" : "png";
+            const url = `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.${ext}?size=4096`;
+
+            return (
+                <Pressable onPress={(e) => openModal(url, e)}>
+                    {res}
+                </Pressable>
+            );
+        });
+        patches.push(unpatchGuildIcon);
+    }
 }
 
 export function onUnload() {
@@ -113,4 +137,3 @@ export function onUnload() {
     }
     patches = [];
 }
-
