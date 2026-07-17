@@ -17,37 +17,53 @@ const { TableRowGroup, TableRow, Stack, TextInput } = findByProps(
 export default function Settings() {
   useProxy(storage);
   const [, forceUpdate] = React.useReducer((x) => x + 1, 0);
-  
+
   const [newChannelId, setNewChannelId] = React.useState("");
   const [newGuildId, setNewGuildId] = React.useState("");
+  const [newUserId, setNewUserId] = React.useState("");
 
   // Ensure storage structure exists
   storage.hiddenChannelIds ??= [];
   storage.hiddenGuildIds ??= [];
+  storage.hiddenUserIds ??= [];
 
-  const addItem = (id: string, type: "channel" | "guild") => {
+  const addItem = (id: string, type: "channel" | "guild" | "user") => {
     const cleanId = id.trim();
     if (!cleanId) {
       showToast(`Please enter a ${type} ID`, getAssetIDByName("Small"));
       return;
     }
 
-    const targetList = type === "channel" ? "hiddenChannelIds" : "hiddenGuildIds";
+    let targetList: "hiddenChannelIds" | "hiddenGuildIds" | "hiddenUserIds";
+    if (type === "channel") targetList = "hiddenChannelIds";
+    else if (type === "guild") targetList = "hiddenGuildIds";
+    else targetList = "hiddenUserIds";
 
     if (!storage[targetList].includes(cleanId)) {
       storage[targetList] = [...storage[targetList], cleanId];
-      if (type === "channel") setNewChannelId("");
-      else setNewGuildId("");
       
+      if (type === "channel") setNewChannelId("");
+      else if (type === "guild") setNewGuildId("");
+      else setNewUserId("");
+
       forceUpdate();
-      showToast(`${type === "channel" ? "Channel" : "Server"} ID hidden!`, getAssetIDByName("Check"));
+      
+      let label = "Channel ID hidden!";
+      if (type === "guild") label = "Server ID hidden!";
+      if (type === "user") label = "User pings blocked!";
+      
+      showToast(label, getAssetIDByName("Check"));
     } else {
       showToast("ID already exists in list", getAssetIDByName("Warning"));
     }
   };
 
-  const removeItem = (id: string, type: "channel" | "guild") => {
-    const targetList = type === "channel" ? "hiddenChannelIds" : "hiddenGuildIds";
+  const removeItem = (id: string, type: "channel" | "guild" | "user") => {
+    let targetList: "hiddenChannelIds" | "hiddenGuildIds" | "hiddenUserIds";
+    if (type === "channel") targetList = "hiddenChannelIds";
+    else if (type === "guild") targetList = "hiddenGuildIds";
+    else targetList = "hiddenUserIds";
+
     storage[targetList] = storage[targetList].filter((item: string) => item !== id);
     forceUpdate();
     showToast("ID removed", getAssetIDByName("Check"));
@@ -56,7 +72,7 @@ export default function Settings() {
   return (
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 10 }}>
       <Stack spacing={12}>
-        
+
         {/* --- SECTION: CHANNEL MENTION SHIELD --- */}
         <TableRowGroup title="Hide Channel Mention Counts">
           <Stack spacing={4}>
@@ -133,11 +149,49 @@ export default function Settings() {
           </TableRowGroup>
         )}
 
+        {/* --- SECTION: USER MENTION BLOCKER --- */}
+        <TableRowGroup title="Block Mentions From Specific Users">
+          <Stack spacing={4}>
+            <TextInput
+              placeholder="Enter User ID"
+              value={newUserId}
+              onChange={setNewUserId}
+              isClearable
+              onSubmitEditing={() => addItem(newUserId, "user")}
+              returnKeyType="done"
+            />
+            <TableRow
+              label="Add User ID"
+              trailing={<TableRow.Arrow />}
+              onPress={() => addItem(newUserId, "user")}
+            />
+          </Stack>
+        </TableRowGroup>
+
+        {storage.hiddenUserIds.length > 0 && (
+          <TableRowGroup title="Muted Users">
+            {storage.hiddenUserIds.map((id: string, index: number) => (
+              <TableRow
+                key={index}
+                label={id}
+                trailing={
+                  <RN.TouchableOpacity onPress={() => removeItem(id, "user")}>
+                    <RN.Image
+                      source={getAssetIDByName("TrashIcon")}
+                      style={{ width: 20, height: 20, tintColor: "#ff4d4d" }}
+                    />
+                  </RN.TouchableOpacity>
+                }
+              />
+            ))}
+          </TableRowGroup>
+        )}
+
         {/* --- INSTRUCTIONS --- */}
         <TableRowGroup title="Quick Guide">
           <TableRow
             label="How to get IDs?"
-            subLabel="Go to Discord Settings → Advanced → Turn on Developer Mode. Then, long press any channel or server and click 'Server/Channel ID'."
+            subLabel="Go to Discord Settings → Advanced → Turn on Developer Mode. Then, long press any channel, server, or user profile and click 'Copy ID'."
           />
         </TableRowGroup>
 
