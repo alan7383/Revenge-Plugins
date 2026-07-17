@@ -3,17 +3,12 @@ import { after } from "@vendetta/patcher";
 import { storage } from "@vendetta/plugin";
 import Settings from "./settings";
 
-// Initialize storage structures
+// Initialize clean storage structures
 if (!storage.hiddenChannelIds) storage.hiddenChannelIds = [];
 if (!storage.hiddenGuildIds) storage.hiddenGuildIds = [];
 if (!storage.hiddenUserIds) storage.hiddenUserIds = [];
-if (!storage.whitelistedUserIds) storage.whitelistedUserIds = [];
 
 let patches: (() => void)[] = [];
-
-// Dynamic tracker maps to override the "0" lock instantly when whitelisted users ping you
-const activeBypassChannels = new Set<string>();
-const activeBypassGuilds = new Set<string>();
 
 export default {
   onLoad() {
@@ -24,49 +19,30 @@ export default {
     const UnreadsStore = findByProps("getUnreadCount") || findByProps("hasUnread");
     const Dispatcher = findByProps("dispatch", "subscribe");
 
-    // 1. Raw Dispatch Interceptor (Handles fast-switching blacklist and whitelist counters)
+    // 1. Raw Dispatch Interceptor (Instantly drops blacklisted user pings)
     if (Dispatcher && typeof Dispatcher.addInterceptor === "function") {
       const cancelInterceptor = Dispatcher.addInterceptor((event) => {
         if (event.type === "MESSAGE_CREATE") {
           const message = event.message;
           const authorId = message?.author?.id;
-          const channelId = message?.channel_id;
-          const guildId = event.guildId;
 
-          if (!authorId) return false;
-
-          // Blacklist Logic: Instantly drop the ping if sender is globally blocked
-          if (storage.hiddenUserIds.includes(authorId)) {
+          if (authorId && storage.hiddenUserIds.includes(authorId)) {
             message.mentioned = false;
             message.mentionEveryone = false;
-            if (Array.isArray(message.mentions)) message.mentions = [];
-            return false;
+            if (Array.isArray(message.mentions)) {
+              message.mentions = [];
+            }
           }
-
-          // Whitelist Logic: Switch badge block from 0 to live count if whitelisted user pings you
-          if (message.mentioned && storage.whitelistedUserIds.includes(authorId)) {
-            if (channelId) activeBypassChannels.add(channelId);
-            if (guildId) activeBypassGuilds.add(guildId);
-          }
-        }
-
-        // Automatically clean up maps when you mark as read or click into the channel
-        if (event.type === "CHANNEL_SELECT" || event.type === "MARK_CHANNEL_READ") {
-          if (event.channelId) activeBypassChannels.delete(event.channelId);
-          if (event.guildId) activeBypassGuilds.delete(event.guildId);
         }
         return false;
       });
       patches.push(cancelInterceptor);
     }
 
-    // 2. Channel Mentions Patch
+    // 2. Channel Mentions Shield
     if (MentionStore) {
       patches.push(
         after("getMentionCount", MentionStore, ([id], returnValue) => {
-          // If whitelisted bypass map contains this location, skip shield entirely
-          if (activeBypassChannels.has(id)) return returnValue;
-
           if (storage.hiddenChannelIds.includes(id) || storage.hiddenGuildIds.includes(id)) {
             return 0;
           }
@@ -75,15 +51,13 @@ export default {
       );
     }
 
-    // 3. Guild / Server Mention Aggregates Patch
+    // 3. Guild / Server Mention Aggregates Shield
     if (GuildMentionStore) {
       const methodsToPatch = ["getTotalMentionCount", "getGuildUnreadMentionCount", "getMentionCount"];
       for (const method of methodsToPatch) {
         if (typeof GuildMentionStore[method] === "function") {
           patches.push(
             after(method, GuildMentionStore, ([guildId], returnValue) => {
-              if (activeBypassGuilds.has(guildId)) return returnValue;
-
               if (storage.hiddenGuildIds.includes(guildId)) {
                 return 0;
               }
@@ -94,15 +68,13 @@ export default {
       }
     }
 
-    // 4. Guild Read State Store Patch
+    // 4. Guild Read State Store Shield
     if (GuildReadStateStore) {
       const guildMethods = ["getMentionCount", "getGuildUnreadMentionCount", "getTotalMentionCount", "hasUnread", "getUnreadCount"];
       for (const method of guildMethods) {
         if (typeof GuildReadStateStore[method] === "function") {
           patches.push(
             after(method, GuildReadStateStore, ([guildId], returnValue) => {
-              if (activeBypassGuilds.has(guildId)) return returnValue;
-
               if (storage.hiddenGuildIds.includes(guildId)) {
                 return method === "hasUnread" ? false : 0;
               }
@@ -113,7 +85,7 @@ export default {
       }
     }
 
-    // 5. Raw ReadStates Map Interception Patch
+    // 5. Raw ReadStates Map Interception
     if (ReadStateStore && ReadStateStore.getAllReadStates) {
       patches.push(
         after("getAllReadStates", ReadStateStore, (args, returnValue) => {
@@ -121,13 +93,13 @@ export default {
             const modifiedState = { ...returnValue };
 
             for (const id of storage.hiddenChannelIds) {
-              if (modifiedState[id] && !activeBypassChannels.has(id)) {
+              if (modifiedState[id]) {
                 modifiedState[id] = { ...modifiedState[id], mentionCount: 0, _unreadCount: 0, unreadCount: 0 };
               }
             }
 
             for (const id of storage.hiddenGuildIds) {
-              if (modifiedState[id] && !activeBypassGuilds.has(id)) {
+              if (modifiedState[id]) {
                 modifiedState[id] = { ...modifiedState[id], mentionCount: 0, _unreadCount: 0, unreadCount: 0 };
               }
             }
@@ -139,13 +111,11 @@ export default {
       );
     }
 
-    // 6. General Unread Indicators / Dots Fallback Patch
+    // 6. General Unread Indicators / Dots Fallback
     if (UnreadsStore) {
       if (UnreadsStore.getUnreadCount) {
         patches.push(
           after("getUnreadCount", UnreadsStore, ([id], returnValue) => {
-            if (activeBypassChannels.has(id) || activeBypassGuilds.has(id)) return returnValue;
-
             if (storage.hiddenChannelIds.includes(id) || storage.hiddenGuildIds.includes(id)) {
               return 0;
             }
@@ -156,8 +126,6 @@ export default {
       if (UnreadsStore.hasUnread) {
         patches.push(
           after("hasUnread", UnreadsStore, ([id], returnValue) => {
-            if (activeBypassChannels.has(id) || activeBypassGuilds.has(id)) return returnValue;
-
             if (storage.hiddenChannelIds.includes(id) || storage.hiddenGuildIds.includes(id)) {
               return false;
             }
@@ -173,8 +141,6 @@ export default {
       unpatch();
     }
     patches = [];
-    activeBypassChannels.clear();
-    activeBypassGuilds.clear();
   },
 
   settings: Settings,
