@@ -21,42 +21,36 @@ export default function Settings() {
   const [newChannelId, setNewChannelId] = React.useState("");
   const [newGuildId, setNewGuildId] = React.useState("");
   const [newUserId, setNewUserId] = React.useState("");
-  const [newWhitelistId, setNewWhitelistId] = React.useState("");
 
-  // Ensure storage structures exist safely
+  // Ensure storage structures exist
   storage.hiddenChannelIds ??= [];
   storage.hiddenGuildIds ??= [];
   storage.hiddenUserIds ??= [];
-  storage.whitelistedUserIds ??= [];
-  storage.whitelistedMentionChannels ??= {};
 
-  const addItem = (id: string, type: "channel" | "guild" | "user" | "whitelist") => {
+  const addItem = (id: string, type: "channel" | "guild" | "user") => {
     const cleanId = id.trim();
     if (!cleanId) {
       showToast(`Please enter a ${type} ID`, getAssetIDByName("Small"));
       return;
     }
 
-    let targetList: "hiddenChannelIds" | "hiddenGuildIds" | "hiddenUserIds" | "whitelistedUserIds";
+    let targetList: "hiddenChannelIds" | "hiddenGuildIds" | "hiddenUserIds";
     if (type === "channel") targetList = "hiddenChannelIds";
     else if (type === "guild") targetList = "hiddenGuildIds";
-    else if (type === "user") targetList = "hiddenUserIds";
-    else targetList = "whitelistedUserIds";
+    else targetList = "hiddenUserIds";
 
     if (!storage[targetList].includes(cleanId)) {
       storage[targetList] = [...storage[targetList], cleanId];
       
       if (type === "channel") setNewChannelId("");
       else if (type === "guild") setNewGuildId("");
-      else if (type === "user") setNewUserId("");
-      else setNewWhitelistId("");
+      else setNewUserId("");
 
       forceUpdate();
       
       let label = "Channel ID hidden!";
       if (type === "guild") label = "Server ID hidden!";
       if (type === "user") label = "User pings blocked!";
-      if (type === "whitelist") label = "User whitelisted!";
       
       showToast(label, getAssetIDByName("Check"));
     } else {
@@ -64,12 +58,11 @@ export default function Settings() {
     }
   };
 
-  const removeItem = (id: string, type: "channel" | "guild" | "user" | "whitelist") => {
-    let targetList: "hiddenChannelIds" | "hiddenGuildIds" | "hiddenUserIds" | "whitelistedUserIds";
+  const removeItem = (id: string, type: "channel" | "guild" | "user") => {
+    let targetList: "hiddenChannelIds" | "hiddenGuildIds" | "hiddenUserIds";
     if (type === "channel") targetList = "hiddenChannelIds";
     else if (type === "guild") targetList = "hiddenGuildIds";
-    else if (type === "user") targetList = "hiddenUserIds";
-    else targetList = "whitelistedUserIds";
+    else targetList = "hiddenUserIds";
 
     storage[targetList] = storage[targetList].filter((item: string) => item !== id);
     forceUpdate();
@@ -176,7 +169,7 @@ export default function Settings() {
         </TableRowGroup>
 
         {storage.hiddenUserIds.length > 0 && (
-          <TableRowGroup title="Blocked Users">
+          <TableRowGroup title="Muted Users">
             {storage.hiddenUserIds.map((id: string, index: number) => (
               <TableRow
                 key={index}
@@ -194,49 +187,11 @@ export default function Settings() {
           </TableRowGroup>
         )}
 
-        {/* --- SECTION: WHITELIST USERS --- */}
-        <TableRowGroup title="Whitelist Users">
-          <Stack spacing={4}>
-            <TextInput
-              placeholder="Enter User ID"
-              value={newWhitelistId}
-              onChange={setNewWhitelistId}
-              isClearable
-              onSubmitEditing={() => addItem(newWhitelistId, "whitelist")}
-              returnKeyType="done"
-            />
-            <TableRow
-              label="Add Whitelisted User"
-              trailing={<TableRow.Arrow />}
-              onPress={() => addItem(newWhitelistId, "whitelist")}
-            />
-          </Stack>
-        </TableRowGroup>
-
-        {storage.whitelistedUserIds.length > 0 && (
-          <TableRowGroup title="Whitelisted Users">
-            {storage.whitelistedUserIds.map((id: string, index: number) => (
-              <TableRow
-                key={index}
-                label={id}
-                trailing={
-                  <RN.TouchableOpacity onPress={() => removeItem(id, "whitelist")}>
-                    <RN.Image
-                      source={getAssetIDByName("TrashIcon")}
-                      style={{ width: 20, height: 20, tintColor: "#ff4d4d" }}
-                    />
-                  </RN.TouchableOpacity>
-                }
-              />
-            ))}
-          </TableRowGroup>
-        )}
-
         {/* --- INSTRUCTIONS --- */}
         <TableRowGroup title="Quick Guide">
           <TableRow
             label="How to get IDs?"
-            subLabel="Enable Developer Mode in Discord Settings → Advanced. Then long press a server, channel, or user profile and choose Copy ID."
+            subLabel="Go to Discord Settings → Advanced → Turn on Developer Mode. Then, long press any channel, server, or user profile and click 'Copy ID'."
           />
         </TableRowGroup>
 
