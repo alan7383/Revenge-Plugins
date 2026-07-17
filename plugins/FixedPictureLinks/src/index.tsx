@@ -6,13 +6,10 @@ const ProfileBanner = findByName("ProfileBanner", false);
 const HeaderAvatar = findByName("HeaderAvatar", false);
 const GuildIcon = findByName("GuildIcon", false);
 
-// Global Action Sheet Manager found by your eval
-const ActionSheetManager = findByProps("showActionSheet");
 const { openMediaModal } = findByProps("openMediaModal");
 const { hideActionSheet } = findByProps("hideActionSheet");
 const { getChannelId } = findByStoreName("SelectedChannelStore");
 const { getGuildId } = findByStoreName("SelectedGuildStore");
-const GuildStore = findByStoreName("GuildStore");
 
 let patches: (() => void)[] = [];
 
@@ -51,41 +48,13 @@ async function openModal(src: string, event) {
             }
         });
     } catch (e) {
-        console.error("[Profiles] Failed to open modal:", e);
+        console.error("[Profiles] Modal error:", e);
     }
 }
 
 if (patcher && typeof patcher.after === "function") {
 
-    // 1. GLOBAL ACTION SHEET PATCH (Catches Server Previews / GuildActionSheet)
-    if (ActionSheetManager) {
-        const unpatchActionSheet = patcher.after("showActionSheet", ActionSheetManager, (args) => {
-            // Check if the opening sheet is related to a guild
-            const sheetConfig = args[0];
-            const guildId = sheetConfig?.guildId || sheetConfig?.props?.guildId;
-            
-            if (guildId) {
-                const guild = GuildStore?.getGuild?.(guildId);
-                if (guild && guild.icon) {
-                    // We found the active guild data inside the preview layout!
-                    const ext = guild.icon.startsWith("a_") ? "gif" : "png";
-                    const iconUrl = `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.${ext}?size=4096`;
-                    
-                    // If a banner exists for this server preview sheet
-                    let bannerUrl = null;
-                    if (guild.banner) {
-                        const bExt = guild.banner.startsWith("a_") ? "gif" : "png";
-                        bannerUrl = `https://cdn.discordapp.com/banners/${guild.id}/${guild.banner}.${bExt}?size=4096`;
-                    }
-                    
-                    // Intercept and wrap the sheet contents or make it tappable if needed
-                }
-            }
-        });
-        patches.push(unpatchActionSheet);
-    }
-
-    // 2. USER PROFILE SHEET AVATARS
+    // 1. RE-FIXED USER PROFILE AVATARS
     const unpatchAvatar = patcher.after("default", HeaderAvatar, (args, res) => {
         const props = args[0];
         const user = props?.user;
@@ -121,7 +90,7 @@ if (patcher && typeof patcher.after === "function") {
     });
     patches.push(unpatchAvatar);
 
-    // 3. PROFILE BANNERS
+    // 2. RE-FIXED PROFILE BANNERS
     const unpatchBanner = patcher.after("default", ProfileBanner, (args, res) => {
         const props = args[0];
         if (!props?.bannerSource?.uri || !res) return res;
@@ -135,7 +104,7 @@ if (patcher && typeof patcher.after === "function") {
     });
     patches.push(unpatchBanner);
 
-    // 4. CHANNELS DRAWER / SERVER LIST ICONS
+    // 3. RE-FIXED SERVER ICONS
     if (GuildIcon) {
         const unpatchGuildIcon = patcher.after("default", GuildIcon, (args, res) => {
             const props = args[0];
