@@ -26,7 +26,7 @@ let unpatchInviteDetails: () => void;
 export default {
   onLoad() {
     if (!InviteDetailsModule) {
-      console.error("[Lurker] InviteDetails target binding contextual signature not found.");
+      console.error("[Lurker] InviteDetails target binding not found.");
       return;
     }
 
@@ -37,50 +37,70 @@ export default {
 
       const targetGuildId = inviteData.guild.id;
 
-      // Safe evaluation context boundary for looking up internal layout trees
-      if (res && res.props) {
-        let childrenContainer = res.props.children;
+      // Deep search helper to find the ButtonGroup child array inside the bytecode structure
+      function findAndPatchButtons(node: any): boolean {
+        if (!node || typeof node !== "object") return false;
 
-        // Trace standard nested layout vectors if Discord is wrapping arrays inside Fragments
-        if (childrenContainer && childrenContainer.props && Array.isArray(childrenContainer.props.children)) {
-          childrenContainer = childrenContainer.props.children;
-        }
+        // Check if this node has props and children
+        if (node.props && node.props.children) {
+          const children = node.props.children;
 
-        if (Array.isArray(childrenContainer)) {
-          // Check if a Lurk button already exists in the stack to prevent memory leaks
-          const alreadyHasLurk = childrenContainer.some(
-            (child: any) => child?.props?.accessibilityLabel === "Lurk Preview Button"
-          );
-
-          if (!alreadyHasLurk) {
-            // Locate Discord's original action ButtonGroup container module dynamically inside the schema loop
-            const buttonGroupIndex = childrenContainer.findIndex(
-              (child: any) => child?.props?.children && Array.isArray(child.props.children) && child.props.children.length >= 1
+          if (Array.isArray(children)) {
+            // Identify if this specific array contains the action buttons by checking properties
+            const hasActionButtons = children.some(
+              (child: any) => child?.props && ('onPress' in child.props || 'text' in child.props)
             );
 
-            // Construct replacement component map mirroring native element layouts
-            const ButtonModule = childrenContainer[buttonGroupIndex >= 0 ? buttonGroupIndex : childrenContainer.length - 1]?.props?.children?.[0]?.type;
-            
-            if (ButtonModule) {
-              const customLurkButton = React.createElement(ButtonModule, {
-                variant: "secondary", 
-                size: "lg",
-                text: "Lurk Preview",
-                accessibilityLabel: "Lurk Preview Button",
-                style: { marginTop: 8 },
-                onPress: () => lurk(targetGuildId),
-              });
+            if (hasActionButtons) {
+              // Check if our button is already added to prevent duplicates
+              const alreadyHasLurk = children.some(
+                (child: any) => child?.props?.accessibilityLabel === "Lurk Preview Button"
+              );
 
-              // Safely splice right above/next to the primary interaction blocks depending on tree indices
-              if (buttonGroupIndex !== -1 && Array.isArray(childrenContainer[buttonGroupIndex].props.children)) {
-                childrenContainer[buttonGroupIndex].props.children.push(customLurkButton);
-              } else {
-                childrenContainer.push(customLurkButton);
+              if (!alreadyHasLurk) {
+                // Safely grab the original button component class/function type to maintain native styling
+                const OriginalButtonComponent = children[0]?.type;
+
+                if (OriginalButtonComponent) {
+                  const customLurkButton = React.createElement(OriginalButtonComponent, {
+                    variant: "secondary", 
+                    size: "lg",
+                    text: "Lurk Preview",
+                    accessibilityLabel: "Lurk Preview Button",
+                    style: { marginTop: 8 },
+                    onPress: () => lurk(targetGuildId),
+                  });
+
+                  // Add our button right into the action group layout array
+                  children.push(customLurkButton);
+                  return true;
+                }
               }
             }
+
+            // If it's a normal array but not the button container, keep digging down each branch
+            for (const child of children) {
+              if (findAndPatchButtons(child)) return true;
+            }
+          } else if (typeof children === "object") {
+            // Dig deeper into single child objects
+            return findAndPatchButtons(children);
           }
         }
+
+        // Handle situations where the layout nodes are nested arrays directly
+        if (Array.isArray(node)) {
+          for (const item of node) {
+            if (findAndPatchButtons(item)) return true;
+          }
+        }
+
+        return false;
       }
+
+      // Start the recursive traversal through the compiled layout object tree
+      findAndPatchButtons(res);
+
       return res;
     });
   },
