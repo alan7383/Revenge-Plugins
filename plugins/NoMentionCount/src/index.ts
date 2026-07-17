@@ -3,8 +3,10 @@ import { after } from "@vendetta/patcher";
 import { storage } from "@vendetta/plugin";
 import Settings from "./settings";
 
+// Initialize storage arrays if they don't exist
 if (!storage.hiddenChannelIds) storage.hiddenChannelIds = [];
 if (!storage.hiddenGuildIds) storage.hiddenGuildIds = [];
+if (!storage.hiddenUserIds) storage.hiddenUserIds = [];
 
 let patches: (() => void)[] = [];
 
@@ -16,11 +18,39 @@ export default {
     const GuildReadStateStore = findByStoreName("GuildReadStateStore") || findByProps("getMentionCount", "getGuildUnreadMentionCount");
     const ReadStateStore = findByStoreName("ReadStateStore") || findByProps("getAllReadStates");
     const UnreadsStore = findByProps("getUnreadCount") || findByProps("hasUnread");
-    
-    // Folder Store found in our evaluation!
     const FolderStore = findByProps("getGuildFolders");
+    
+    // Discord's central dispatcher
+    const Dispatcher = findByProps("dispatch", "subscribe");
 
-    // 1. Patch Folder Guild Lists (Prevents hidden servers from bloating folder badges)
+    // 1. Raw Dispatch Interceptor (Strips mentions from specific blacklisted users in real-time)
+    if (Dispatcher && typeof Dispatcher.addInterceptor === "function") {
+      const cancelInterceptor = Dispatcher.addInterceptor((event) => {
+        if (event.type === "MESSAGE_CREATE") {
+          const message = event.message;
+          const authorId = message?.author?.id;
+
+          // Quick exit if the message author is not blacklisted
+          if (!authorId || !storage.hiddenUserIds.includes(authorId)) {
+            return false;
+          }
+
+          // Strip mention status so the local client ignores the ping entirely
+          message.mentioned = false;
+          message.mentionEveryone = false;
+          
+          if (Array.isArray(message.mentions)) {
+            message.mentions = [];
+          }
+        }
+        return false;
+      });
+
+      // Register the interceptor cleanup function
+      patches.push(cancelInterceptor);
+    }
+
+    // 2. Patch Folder Guild Lists (Prevents hidden servers from bloating folder badges)
     if (FolderStore && FolderStore.getGuildFolders) {
       patches.push(
         after("getGuildFolders", FolderStore, (args, returnValue) => {
@@ -41,7 +71,7 @@ export default {
       );
     }
 
-    // 2. Channel Mentions
+    // 3. Channel Mentions
     if (MentionStore) {
       patches.push(
         after("getMentionCount", MentionStore, ([id], returnValue) => {
@@ -53,7 +83,7 @@ export default {
       );
     }
 
-    // 3. Guild / Server Mention Aggregates
+    // 4. Guild / Server Mention Aggregates
     if (GuildMentionStore) {
       const methodsToPatch = [
         "getTotalMentionCount", 
@@ -75,7 +105,7 @@ export default {
       }
     }
 
-    // 4. Guild Read State Store
+    // 5. Guild Read State Store
     if (GuildReadStateStore) {
       const guildMethods = [
         "getMentionCount",
@@ -99,7 +129,7 @@ export default {
       }
     }
 
-    // 5. Raw ReadStates Map Interception
+    // 6. Raw ReadStates Map Interception
     if (ReadStateStore && ReadStateStore.getAllReadStates) {
       patches.push(
         after("getAllReadStates", ReadStateStore, (args, returnValue) => {
@@ -135,7 +165,7 @@ export default {
       );
     }
 
-    // 6. General Unread Indicators / Dots Fallback
+    // 7. General Unread Indicators / Dots Fallback
     if (UnreadsStore) {
       if (UnreadsStore.getUnreadCount) {
         patches.push(
