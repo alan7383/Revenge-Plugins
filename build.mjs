@@ -1,4 +1,4 @@
-import { readFile, writeFile, readdir } from "fs/promises";
+import { readFile, writeFile, readdir, mkdir, rm } from "fs/promises";
 import { extname } from "path";
 import { createHash } from "crypto";
 
@@ -48,10 +48,19 @@ const plugins = [
     esbuild({ minify: true }),
 ];
 
+// Clean and recreate the root dist folder before building
+try {
+    await rm("./dist", { recursive: true, force: true });
+} catch (e) {}
+await mkdir("./dist", { recursive: true });
+
 for (let plug of await readdir("./plugins")) {
     try {
         const manifest = JSON.parse(await readFile(`./plugins/${plug}/manifest.json`));
         const outPath = `./dist/${plug}/index.js`;
+
+        // Safely ensure the plugin's specific output folder exists
+        await mkdir(`./dist/${plug}`, { recursive: true });
 
         try {
             const bundle = await rollup({
