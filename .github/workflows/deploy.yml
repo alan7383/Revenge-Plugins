@@ -26,22 +26,17 @@ jobs:
       - name: Build plugin(s)
         run: node ./build.mjs
 
-      # Foolproof feature:
-      # - Copies over README so that the root of the deployed website shows it
-      # - Changes 404 page to README so that you don't get lost while clicking links
-      # If you remove this step then you should probably remove the enable_jekyll option in the next one
-      - name: Copy additional files
+      - name: Prepare deployment
         run: |
-          cp README.md dist/README.md
-          printf -- "---\npermalink: /404.html\n---\n" > dist/404.md
-          printf -- "> **Note:** You accessed a link that returned a 404, probably by clicking one of the plugin links. You're supposed to copy the link address and add it into Vendetta.\n\n" >> dist/404.md
-          cat README.md >> dist/404.md
+          # Copy the new UI to dist
+          cp docs/index.html dist/index.html
+          cp docs/.nojekyll dist/.nojekyll
 
       # Documentation: https://github.com/peaceiris/actions-gh-pages
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./docs
+          publish_dir: ./dist
           enable_jekyll: false
           # cname: example.com
