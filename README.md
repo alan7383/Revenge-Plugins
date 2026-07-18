@@ -9,3 +9,4 @@ Paste a plugin URL into the Plugins page of Revenge, following a basic format of
 ```
 https://fshinz.github.io/Revenge-Plugins/PLUGIN_NAME
 ```
+̤
