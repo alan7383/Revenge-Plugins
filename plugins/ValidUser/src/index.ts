@@ -16,7 +16,7 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 function extractIdsFromText(text: string): string[] {
     if (!text) return [];
-    return [...text.matchAll(/<@!?(\d+)>/g)].map(x => x[1]);
+    return [...text.matchAll(/<@!?(\d{17,19})>/g)].map(x => x[1]);
 }
 
 function extractAllMentionIds(message: any): string[] {
@@ -101,16 +101,11 @@ async function fetchUsersViaGateway(userIds: string[]): Promise<boolean> {
     return true;
 }
 
-async function fetchUsersViaAPI(userId: string, token: string, API: any, Dispatcher: any) {
-    const cleanToken = typeof token === "string" ? token : (token as any)?.token || "";
+async function fetchUser(userId: string) {
+    const Dispatcher = findByProps("dispatch", "subscribe");
+    const RestAPI = findByProps("get", "post", "del", "patch");
 
-    const res = await API.get({
-        url: `/users/${userId}`,
-        headers: {
-            Authorization: cleanToken.trim()
-        }
-    });
-
+    const res = await RestAPI.get({ url: `/users/${userId}` });
     if (res.body) {
         Dispatcher.dispatch({
             type: "USER_UPDATE",
@@ -151,19 +146,12 @@ async function fixUnknownMentions(message: any) {
     }
 
     if (!success) {
-        const API = findByProps("get", "post");
-        const Dispatcher = findByProps("dispatch", "subscribe");
-        const TokenStore = findByProps("getToken");
-        const token = TokenStore?.getToken();
-
-        if (!token) return;
-
         const safetyDelay = uncachedIds.length > 10 ? 450 : 250;
 
         for (let i = 0; i < uncachedIds.length; i++) {
             const userId = uncachedIds[i];
             try {
-                await fetchUsersViaAPI(userId, token, API, Dispatcher);
+                await fetchUser(userId);
             } catch (err) {
                 logger.error(`[ValidUser] Fetch Failed for ${userId}:`, err);
             }
