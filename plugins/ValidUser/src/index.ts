@@ -175,6 +175,7 @@ async function fetchUser(userId: string) {
         url: `/users/${userId}`
     });
 
+    const res = await RestAPI.get({ url: `/users/${userId}` });
     if (res.body) {
         Dispatcher.dispatch({
             type: "USER_UPDATE",
