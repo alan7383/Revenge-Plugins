@@ -8,7 +8,8 @@ import { getAssetIDByName } from "@vendetta/ui/assets";
 const ActionSheet = findByProps("openLazy", "hideActionSheet");
 const { ActionSheetRow } = findByProps("ActionSheetRow");
 
-const MentionIcon = getAssetIDByName("ic_mention_24px") ??
+const MentionIcon =
+    getAssetIDByName("ic_mention_24px") ??
     getAssetIDByName("MentionIcon") ??
     getAssetIDByName("mention");
 
@@ -30,44 +31,24 @@ function extractAllMentionIds(message: any): string[] {
         ids.push(...extractIdsFromText(message.content));
     }
 
-    if (
-        message.embeds &&
-        Array.isArray(message.embeds)
-    ) {
+    if (message.embeds && Array.isArray(message.embeds)) {
         for (const embed of message.embeds) {
             if (embed.rawTitle) {
-                ids.push(
-                    ...extractIdsFromText(embed.rawTitle)
-                );
+                ids.push(...extractIdsFromText(embed.rawTitle));
             }
 
             if (embed.rawDescription) {
-                ids.push(
-                    ...extractIdsFromText(
-                        embed.rawDescription
-                    )
-                );
+                ids.push(...extractIdsFromText(embed.rawDescription));
             }
 
-            if (
-                embed.fields &&
-                Array.isArray(embed.fields)
-            ) {
+            if (embed.fields && Array.isArray(embed.fields)) {
                 for (const field of embed.fields) {
                     if (field.name) {
-                        ids.push(
-                            ...extractIdsFromText(
-                                field.name
-                            )
-                        );
+                        ids.push(...extractIdsFromText(field.name));
                     }
 
                     if (field.value) {
-                        ids.push(
-                            ...extractIdsFromText(
-                                field.value
-                            )
-                        );
+                        ids.push(...extractIdsFromText(field.value));
                     }
                 }
             }
@@ -83,16 +64,14 @@ function isUserCached(userId: string): boolean {
         "getCurrentUser"
     );
 
-    const user =
-        UserStore?.getUser?.(userId);
-
-    return !!user;
+    return !!UserStore?.getUser?.(userId);
 }
 
 async function forceUIRefresh(
     channelId: string,
     messageId: string,
-    content: string
+    content: string,
+    embeds: any[] = []
 ) {
     const Dispatcher = findByProps(
         "dispatch",
@@ -108,7 +87,8 @@ async function forceUIRefresh(
         message: {
             id: messageId,
             channel_id: channelId,
-            content: freshContent
+            content: freshContent,
+            embeds
         }
     });
 
@@ -119,7 +99,8 @@ async function forceUIRefresh(
         message: {
             id: messageId,
             channel_id: channelId,
-            content: content
+            content,
+            embeds
         }
     });
 }
@@ -171,18 +152,17 @@ async function fetchUser(userId: string) {
         "patch"
     );
 
-    const res = await RestAPI.get({
+    const response = await RestAPI.get({
         url: `/users/${userId}`
     });
 
-    const res = await RestAPI.get({ url: `/users/${userId}` });
-    if (res.body) {
+    if (response.body) {
         Dispatcher.dispatch({
             type: "USER_UPDATE",
-            user: res.body
+            user: response.body
         });
 
-        return res.body.username;
+        return response.body.username;
     }
 
     throw new Error(
@@ -190,9 +170,7 @@ async function fetchUser(userId: string) {
     );
 }
 
-async function fixUnknownMentions(
-    message: any
-) {
+async function fixUnknownMentions(message: any) {
     const ids =
         extractAllMentionIds(message);
 
@@ -212,20 +190,22 @@ async function fixUnknownMentions(
         }
     }
 
-    const hasEmbeds =
-        Array.isArray(message.embeds) &&
-        message.embeds.length > 0;
-
     if (uncachedIds.length === 0) {
+        /*
+         * Only refresh normal messages.
+         * Embed-only messages can lose their embed content
+         * when manually dispatched as MESSAGE_UPDATE.
+         */
         if (
-            !hasEmbeds &&
             channelId &&
-            messageId
+            messageId &&
+            message.content
         ) {
             await forceUIRefresh(
                 channelId,
                 messageId,
-                message.content
+                message.content,
+                message.embeds
             );
         }
 
@@ -236,12 +216,12 @@ async function fixUnknownMentions(
 
     let success = false;
 
-    const SelectedGuildStore =
-        findByProps("getGuildId");
+    const SelectedGuildStore = findByProps(
+        "getGuildId"
+    );
 
     if (
-        uncachedIds.length >
-            BULK_THRESHOLD &&
+        uncachedIds.length > BULK_THRESHOLD &&
         SelectedGuildStore?.getGuildId?.()
     ) {
         success =
@@ -284,15 +264,21 @@ async function fixUnknownMentions(
         }
     }
 
+    /*
+     * Do not force a MESSAGE_UPDATE on embed-only messages.
+     * Discord can replace/remove the embed when the partial
+     * message update does not contain the complete embed state.
+     */
     if (
-        !hasEmbeds &&
         channelId &&
-        messageId
+        messageId &&
+        message.content
     ) {
         await forceUIRefresh(
             channelId,
             messageId,
-            message.content
+            message.content,
+            message.embeds
         );
     }
 }
@@ -337,8 +323,9 @@ export default {
                                     component: any
                                 ) => {
                                     React.useEffect(
-                                        () => () =>
-                                            unpatch(),
+                                        () => () => {
+                                            unpatch();
+                                        },
                                         []
                                     );
 
@@ -371,14 +358,13 @@ export default {
                                                         ? "Fix Unknown Mention"
                                                         : `Fix ${ids.length} Unknown Mentions`,
 
-                                                icon:
-                                                    React.createElement(
-                                                        ActionSheetRow.Icon,
-                                                        {
-                                                            source:
-                                                                MentionIcon
-                                                        }
-                                                    ),
+                                                icon: React.createElement(
+                                                    ActionSheetRow.Icon,
+                                                    {
+                                                        source:
+                                                            MentionIcon
+                                                    }
+                                                ),
 
                                                 onPress:
                                                     () => {
@@ -403,7 +389,9 @@ export default {
                                         const groupChildren:
                                             any[] =
                                             findInReactTree(
-                                                groups[gi],
+                                                groups[
+                                                    gi
+                                                ],
                                                 (c: any) =>
                                                     Array.isArray(
                                                         c
@@ -456,8 +444,6 @@ export default {
 
     onUnload() {
         unpatchOpenLazy?.();
-
-        unpatchOpenLazy =
-            null;
+        unpatchOpenLazy = null;
     }
 };
