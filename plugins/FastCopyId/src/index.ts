@@ -7,7 +7,6 @@ import { getAssetIDByName } from "@vendetta/ui/assets";
 const ActionSheet = findByProps("openLazy", "hideActionSheet");
 const { ActionSheetRow } = findByProps("ActionSheetRow");
 
-// Safely pull native Clipboard & Toast modules
 const ClipboardUtils = findByProps("SUPPORTS_COPY", "copy");
 const ToastUtils = findByProps("showToast", "createToast");
 
@@ -63,11 +62,12 @@ export default {
 
                             if (!groups?.length) return;
 
-                            const alreadyHasButton = findInReactTree(
+                            // Prevent duplicate insertions across re-renders
+                            const alreadyExists = findInReactTree(
                                 component,
                                 (c: any) => c?.props?.label === "Copy User ID"
                             );
-                            if (alreadyHasButton) return;
+                            if (alreadyExists) return;
 
                             const copyIdButton = React.createElement(
                                 ActionSheetRow,
@@ -78,10 +78,8 @@ export default {
                                         { source: IdIcon }
                                     ),
                                     onPress: () => {
-                                        // 1. Hide the sheet first
                                         ActionSheet.hideActionSheet();
 
-                                        // 2. Delay copying & toast slightly to avoid native thread collisions
                                         setTimeout(() => {
                                             safeCopy(authorId);
                                             
@@ -95,7 +93,7 @@ export default {
                                 }
                             );
 
-                            let inserted = false;
+                            // Safely locate the target row container
                             for (let gi = 0; gi < groups.length; gi++) {
                                 const groupChildren: any[] = findInReactTree(
                                     groups[gi],
@@ -110,19 +108,15 @@ export default {
 
                                 if (!groupChildren) continue;
 
-                                groupChildren.unshift(copyIdButton);
-                                inserted = true;
-                                break;
-                            }
-
-                            if (!inserted) {
-                                groups.unshift(
-                                    React.createElement(
-                                        ActionSheetRow.Group,
-                                        null,
-                                        copyIdButton
-                                    )
+                                // Check inside the specific array before injecting
+                                const hasBtnInGroup = groupChildren.some(
+                                    (child: any) => child?.props?.label === "Copy User ID"
                                 );
+
+                                if (!hasBtnInGroup) {
+                                    groupChildren.unshift(copyIdButton);
+                                }
+                                break;
                             }
                         }
                     );
