@@ -82,10 +82,16 @@ export default {
 
                                         setTimeout(() => {
                                             safeCopy(authorId);
-                                            
-                                            if (ToastUtils?.showToast && ToastUtils?.createToast) {
+
+                                            if (
+                                                ToastUtils?.showToast &&
+                                                ToastUtils?.createToast
+                                            ) {
                                                 ToastUtils.showToast(
-                                                    ToastUtils.createToast("Copied User ID!", 1)
+                                                    ToastUtils.createToast(
+                                                        "Copied User ID!",
+                                                        1
+                                                    )
                                                 );
                                             }
                                         }, 100);
@@ -93,30 +99,27 @@ export default {
                                 }
                             );
 
-                            // Safely locate the target row container
-                            for (let gi = 0; gi < groups.length; gi++) {
-                                const groupChildren: any[] = findInReactTree(
-                                    groups[gi],
-                                    (c: any) =>
-                                        Array.isArray(c) &&
-                                        c.some(
-                                            (child: any) =>
-                                                child?.type?.name ===
-                                                "ActionSheetRow"
-                                        )
-                                );
+                            // Target the first group (`groups[0]`) to put it at the very top
+                            const groupChildren: any[] = findInReactTree(
+                                groups[0],
+                                (c: any) =>
+                                    Array.isArray(c) &&
+                                    c.some(
+                                        (child: any) =>
+                                            child?.type?.name ===
+                                            "ActionSheetRow"
+                                    )
+                            );
 
-                                if (!groupChildren) continue;
-
-                                // Check inside the specific array before injecting
+                            if (groupChildren) {
                                 const hasBtnInGroup = groupChildren.some(
-                                    (child: any) => child?.props?.label === "Copy User ID"
+                                    (child: any) =>
+                                        child?.props?.label === "Copy User ID"
                                 );
 
                                 if (!hasBtnInGroup) {
                                     groupChildren.unshift(copyIdButton);
                                 }
-                                break;
                             }
                         }
                     );
