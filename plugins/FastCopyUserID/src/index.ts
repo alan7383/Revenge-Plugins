@@ -42,10 +42,10 @@ export default {
                     return;
                 }
 
-                const authorId = msg.message.author?.id;
-                if (!authorId) return;
-
+                // Store current active message on the lazy instance so onPress always sees the latest target
                 comp.then((instance: any) => {
+                    instance.__currentActiveMessage = msg.message;
+
                     if (instance.__patchedForCopyId) return;
                     instance.__patchedForCopyId = true;
 
@@ -77,11 +77,16 @@ export default {
                                         { source: IdIcon }
                                     ),
                                     onPress: () => {
+                                        // Read dynamically from the active message instance
+                                        const currentAuthorId =
+                                            instance.__currentActiveMessage?.author?.id;
+
                                         ActionSheet.hideActionSheet();
 
+                                        if (!currentAuthorId) return;
+
                                         setTimeout(() => {
-                                            safeCopy(authorId);
-                                            // Trigger Discord native mobile "Copied to clipboard" toast
+                                            safeCopy(currentAuthorId);
                                             ToastPresets?.presentCopiedToClipboard?.();
                                         }, 100);
                                     }
