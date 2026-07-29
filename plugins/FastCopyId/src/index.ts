@@ -1,11 +1,15 @@
 import { findByProps } from "@vendetta/metro";
 import { before, after } from "@vendetta/patcher";
-import { React, clipboard, toast } from "@vendetta/metro/common";
+import { React } from "@vendetta/metro/common";
 import { findInReactTree } from "@vendetta/utils";
 import { getAssetIDByName } from "@vendetta/ui/assets";
 
 const ActionSheet = findByProps("openLazy", "hideActionSheet");
 const { ActionSheetRow } = findByProps("ActionSheetRow");
+
+// Safely pull native Clipboard & Toast modules
+const ClipboardUtils = findByProps("SUPPORTS_COPY", "copy");
+const ToastUtils = findByProps("showToast", "createToast");
 
 const IdIcon =
     getAssetIDByName("ic_id") ??
@@ -13,6 +17,18 @@ const IdIcon =
     getAssetIDByName("id");
 
 let unpatches: (() => void)[] = [];
+
+function safeCopy(text: string) {
+    try {
+        if (ClipboardUtils?.copy) {
+            ClipboardUtils.copy(text);
+        } else if (ClipboardUtils?.copyToClipboard) {
+            ClipboardUtils.copyToClipboard(text);
+        }
+    } catch (e) {
+        console.error("[CopyUserID] Copy failed:", e);
+    }
+}
 
 export default {
     onLoad() {
@@ -31,7 +47,6 @@ export default {
                 if (!authorId) return;
 
                 comp.then((instance: any) => {
-                    // Avoid double-patching the same instance
                     if (instance.__patchedForCopyId) return;
                     instance.__patchedForCopyId = true;
 
@@ -48,7 +63,6 @@ export default {
 
                             if (!groups?.length) return;
 
-                            // Prevent adding the button multiple times if re-rendered
                             const alreadyHasButton = findInReactTree(
                                 component,
                                 (c: any) => c?.props?.label === "Copy User ID"
@@ -64,12 +78,19 @@ export default {
                                         { source: IdIcon }
                                     ),
                                     onPress: () => {
+                                        // 1. Hide the sheet first
                                         ActionSheet.hideActionSheet();
-                                        clipboard.setString(authorId);
-                                        toast.showToast(
-                                            "Copied User ID!",
-                                            getAssetIDByName("Check")
-                                        );
+
+                                        // 2. Delay copying & toast slightly to avoid native thread collisions
+                                        setTimeout(() => {
+                                            safeCopy(authorId);
+                                            
+                                            if (ToastUtils?.showToast && ToastUtils?.createToast) {
+                                                ToastUtils.showToast(
+                                                    ToastUtils.createToast("Copied User ID!", 1)
+                                                );
+                                            }
+                                        }, 100);
                                     }
                                 }
                             );
