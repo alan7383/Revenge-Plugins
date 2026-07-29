@@ -7,21 +7,19 @@ import { getAssetIDByName } from "@vendetta/ui/assets";
 const ActionSheet = findByProps("openLazy", "hideActionSheet");
 const { ActionSheetRow } = findByProps("ActionSheetRow");
 
-// Using IdIcon as requested (with fallbacks just in case)
 const IdIcon =
     getAssetIDByName("ic_id") ??
     getAssetIDByName("IdIcon") ??
     getAssetIDByName("id");
 
-let unpatchOpenLazy: (() => void) | null = null;
+let unpatches: (() => void)[] = [];
 
 export default {
     onLoad() {
-        unpatchOpenLazy = before(
+        const unpatchOpenLazy = before(
             "openLazy",
             ActionSheet,
             ([comp, args, msg]) => {
-                // Ensure we only touch the message long-press menu
                 if (
                     args !== "MessageLongPressActionSheet" ||
                     !msg?.message
@@ -29,18 +27,18 @@ export default {
                     return;
                 }
 
-                const message = msg.message;
-                const authorId = message.author?.id;
-
+                const authorId = msg.message.author?.id;
                 if (!authorId) return;
 
                 comp.then((instance: any) => {
-                    const unpatch = after(
+                    // Avoid double-patching the same instance
+                    if (instance.__patchedForCopyId) return;
+                    instance.__patchedForCopyId = true;
+
+                    const unpatchDefault = after(
                         "default",
                         instance,
                         (_args: any, component: any) => {
-                            React.useEffect(() => () => unpatch(), []);
-
                             const groups: any[] = findInReactTree(
                                 component,
                                 (c: any) =>
@@ -50,16 +48,20 @@ export default {
 
                             if (!groups?.length) return;
 
-                            // Define our "Copy User ID" button
+                            // Prevent adding the button multiple times if re-rendered
+                            const alreadyHasButton = findInReactTree(
+                                component,
+                                (c: any) => c?.props?.label === "Copy User ID"
+                            );
+                            if (alreadyHasButton) return;
+
                             const copyIdButton = React.createElement(
                                 ActionSheetRow,
                                 {
                                     label: "Copy User ID",
                                     icon: React.createElement(
                                         ActionSheetRow.Icon,
-                                        {
-                                            source: IdIcon
-                                        }
+                                        { source: IdIcon }
                                     ),
                                     onPress: () => {
                                         ActionSheet.hideActionSheet();
@@ -72,7 +74,6 @@ export default {
                                 }
                             );
 
-                            // Inject the button into the first ActionSheetRowGroup
                             let inserted = false;
                             for (let gi = 0; gi < groups.length; gi++) {
                                 const groupChildren: any[] = findInReactTree(
@@ -104,13 +105,19 @@ export default {
                             }
                         }
                     );
+
+                    unpatches.push(unpatchDefault);
                 });
             }
         );
+
+        unpatches.push(unpatchOpenLazy);
     },
 
     onUnload() {
-        unpatchOpenLazy?.();
-        unpatchOpenLazy = null;
+        for (const unpatch of unpatches) {
+            unpatch?.();
+        }
+        unpatches = [];
     }
 };
