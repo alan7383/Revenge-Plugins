@@ -8,7 +8,7 @@ const ActionSheet = findByProps("openLazy", "hideActionSheet");
 const { ActionSheetRow } = findByProps("ActionSheetRow");
 
 const ClipboardUtils = findByProps("SUPPORTS_COPY", "copy");
-const ToastUtils = findByProps("showToast", "createToast");
+const ToastPresets = findByProps("presentCopiedToClipboard");
 
 const IdIcon =
     getAssetIDByName("ic_id") ??
@@ -62,7 +62,6 @@ export default {
 
                             if (!groups?.length) return;
 
-                            // Prevent duplicate insertions across re-renders
                             const alreadyExists = findInReactTree(
                                 component,
                                 (c: any) => c?.props?.label === "Copy User ID"
@@ -82,24 +81,13 @@ export default {
 
                                         setTimeout(() => {
                                             safeCopy(authorId);
-
-                                            if (
-                                                ToastUtils?.showToast &&
-                                                ToastUtils?.createToast
-                                            ) {
-                                                ToastUtils.showToast(
-                                                    ToastUtils.createToast(
-                                                        "Copied User ID!",
-                                                        1
-                                                    )
-                                                );
-                                            }
+                                            // Trigger Discord native mobile "Copied to clipboard" toast
+                                            ToastPresets?.presentCopiedToClipboard?.();
                                         }, 100);
                                     }
                                 }
                             );
 
-                            // Target the first group (`groups[0]`) to put it at the very top
                             const groupChildren: any[] = findInReactTree(
                                 groups[0],
                                 (c: any) =>
