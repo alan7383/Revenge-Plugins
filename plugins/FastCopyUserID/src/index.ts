@@ -3,6 +3,8 @@ import { before, after } from "@vendetta/patcher";
 import { React } from "@vendetta/metro/common";
 import { findInReactTree } from "@vendetta/utils";
 import { getAssetIDByName } from "@vendetta/ui/assets";
+import { storage } from "@vendetta/plugin";
+import Settings from "./settings";
 
 const ActionSheet = findByProps("openLazy", "hideActionSheet");
 const { ActionSheetRow } = findByProps("ActionSheetRow");
@@ -14,6 +16,10 @@ const IdIcon =
     getAssetIDByName("ic_id") ??
     getAssetIDByName("IdIcon") ??
     getAssetIDByName("id");
+
+// Default settings
+storage.rowPosition ??= 0;
+storage.alwaysTop ??= false;
 
 let unpatches: (() => void)[] = [];
 
@@ -93,10 +99,64 @@ export default {
                                 }
                             );
 
-                            // Create a new group at the very top with just the copy button
-                            groups.unshift(
-                                React.createElement(ActionSheetRow.Group, null, copyIdButton)
-                            );
+                            // Handle button positioning
+                            if (storage.alwaysTop) {
+                                // Always put at very top
+                                groups.unshift(
+                                    React.createElement(ActionSheetRow.Group, null, copyIdButton)
+                                );
+                            } else {
+                                // Find the target group based on position setting
+                                const position = storage.rowPosition ?? 0;
+                                let targetGroup = groups[position] || groups[groups.length - 1];
+                                
+                                // Try to find the group at specified position
+                                let groupChildren: any[] = findInReactTree(
+                                    targetGroup,
+                                    (c: any) =>
+                                        Array.isArray(c) &&
+                                        c.some(
+                                            (child: any) =>
+                                                child?.type?.name === "ActionSheetRow"
+                                        )
+                                );
+
+                                // If no children found at that position, find the first valid group
+                                if (!groupChildren) {
+                                    for (const group of groups) {
+                                        const children = findInReactTree(
+                                            group,
+                                            (c: any) =>
+                                                Array.isArray(c) &&
+                                                c.some(
+                                                    (child: any) =>
+                                                        child?.type?.name === "ActionSheetRow"
+                                                )
+                                        );
+                                        if (children) {
+                                            groupChildren = children;
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                if (groupChildren) {
+                                    const hasBtnInGroup = groupChildren.some(
+                                        (child: any) =>
+                                            child?.props?.label === "Copy User ID"
+                                    );
+
+                                    if (!hasBtnInGroup) {
+                                        // Insert at top of the target group
+                                        groupChildren.unshift(copyIdButton);
+                                    }
+                                } else {
+                                    // Fallback: create new group at top
+                                    groups.unshift(
+                                        React.createElement(ActionSheetRow.Group, null, copyIdButton)
+                                    );
+                                }
+                            }
                         }
                     );
 
@@ -113,5 +173,7 @@ export default {
             unpatch?.();
         }
         unpatches = [];
-    }
+    },
+
+    settings: Settings,
 };
