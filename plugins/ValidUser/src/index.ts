@@ -75,6 +75,35 @@ function extractAllMentionIds(message: any): string[] {
         ids.push(...extractIdsFromComponents(message.components));
     }
 
+    // Forwarded messages - Discord stores them in message_snapshots
+    if (Array.isArray(message.message_snapshots)) {
+        for (const snapshot of message.message_snapshots) {
+            const snap = snapshot.message ?? snapshot;
+            if (snap.content) {
+                ids.push(...extractIdsFromText(snap.content));
+            }
+            if (snap.embeds && Array.isArray(snap.embeds)) {
+                for (const embed of snap.embeds) {
+                    if (embed.rawTitle) {
+                        ids.push(...extractIdsFromText(embed.rawTitle));
+                    }
+                    if (embed.rawDescription) {
+                        ids.push(...extractIdsFromText(embed.rawDescription));
+                    }
+                    if (embed.fields && Array.isArray(embed.fields)) {
+                        for (const field of embed.fields) {
+                            if (field.rawName) ids.push(...extractIdsFromText(field.rawName));
+                            if (field.rawValue) ids.push(...extractIdsFromText(field.rawValue));
+                        }
+                    }
+                }
+            }
+            if (Array.isArray(snap.components)) {
+                ids.push(...extractIdsFromComponents(snap.components));
+            }
+        }
+    }
+
     return [...new Set(ids)];
 }
 
