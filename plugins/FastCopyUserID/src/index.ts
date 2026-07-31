@@ -93,27 +93,10 @@ export default {
                                 }
                             );
 
-                            const groupChildren: any[] = findInReactTree(
-                                groups[0],
-                                (c: any) =>
-                                    Array.isArray(c) &&
-                                    c.some(
-                                        (child: any) =>
-                                            child?.type?.name ===
-                                            "ActionSheetRow"
-                                    )
+                            // Create a new group at the very top with just the copy button
+                            groups.unshift(
+                                React.createElement(ActionSheetRow.Group, null, copyIdButton)
                             );
-
-                            if (groupChildren) {
-                                const hasBtnInGroup = groupChildren.some(
-                                    (child: any) =>
-                                        child?.props?.label === "Copy User ID"
-                                );
-
-                                if (!hasBtnInGroup) {
-                                    groupChildren.unshift(copyIdButton);
-                                }
-                            }
                         }
                     );
 
