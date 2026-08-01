@@ -18,10 +18,10 @@ const { FormRow, FormIcon } = Forms;
 const unpatch = before("openLazy", LazyActionSheet, ([component, key, msg]) => {
   // Add null check for msg
   if (!msg) return;
-  
+
   const message = msg?.message;
   if (key !== "MessageLongPressActionSheet" || !message) return;
-  
+
   component.then((instance) => {
     const unpatch = after("default", instance, (_, component) => {
       React.useEffect(
@@ -45,7 +45,7 @@ const unpatch = before("openLazy", LazyActionSheet, ([component, key, msg]) => {
         />
       );
 
-      // Add null checks for findInReactTree results
+      // Find existing buttons or action sheet groups
       const actionSheetContainer = findInReactTree(
         component,
         (x) => Array.isArray(x) && x[0]?.type?.name === "ActionSheetRowGroup",
@@ -55,8 +55,8 @@ const unpatch = before("openLazy", LazyActionSheet, ([component, key, msg]) => {
         (x) => x?.[0]?.type?.name === "ButtonRow",
       );
 
-      if (buttons && Array.isArray(buttons)) {
-        // Push to end instead of start to put it at bottom
+      // Case 1: Found ButtonRow - push to end
+      if (buttons?.push) {
         buttons.push(
           <FormRow
             label="View Raw"
@@ -70,21 +70,15 @@ const unpatch = before("openLazy", LazyActionSheet, ([component, key, msg]) => {
               LazyActionSheet.hideActionSheet();
               Navigation.push(navigator);
             }}
-          />,
+          />
         );
-      } else if (actionSheetContainer && actionSheetContainer[1]) {
-        const middleGroup = actionSheetContainer[1];
-        
-        // Add null check for children
-        if (!middleGroup?.props?.children) return;
-        
-        const children = Array.isArray(middleGroup.props.children) 
-          ? middleGroup.props.children 
-          : [middleGroup.props.children];
-        
-        const firstChild = children[0];
-        if (!firstChild?.props?.icon) return;
+        return;
+      }
 
+      // Case 2: Found ActionSheetRowGroup with children - use optional chaining
+      if (actionSheetContainer?.[1]?.props?.children?.[0]?.props?.icon) {
+        const middleGroup = actionSheetContainer[1];
+        const firstChild = middleGroup.props.children[0];
         const ActionSheetRow = firstChild.type;
 
         const viewRawButton = (
@@ -111,37 +105,18 @@ const unpatch = before("openLazy", LazyActionSheet, ([component, key, msg]) => {
             key="view-raw"
           />
         );
-if (actionSheetContainer?.[1]?.props?.children?.[0]?.props?.icon) {
-    const middleGroup = actionSheetContainer[1];
-    const firstChild = middleGroup.props.children[0];
-    const ActionSheetRow = firstChild.type;
-    
-    const viewRawButton = (
-        <ActionSheetRow
-            label="View Raw"
-            icon={{
-                $$typeof: firstChild.props.icon.$$typeof,
-                type: firstChild.props.icon.type,
-                key: null,
-                ref: null,
-                props: {
-                    IconComponent: () => (
-                        <FormIcon
-                            style={{ opacity: 1 }}
-                            source={getAssetIDByName("ic_chat_bubble_32px")}
-                        />
-                    ),
-                },
-            }}
-            onPress={() => {
-                LazyActionSheet.hideActionSheet();
-                Navigation.push(navigator);
-            }}
-            key="view-raw"
-        />
-    );
-    
-    if (middleGroup.props.children?.push) {
-        middleGroup.props.children.push(viewRawButton);
-    }
-}
+
+        // Safely push using optional chaining
+        if (middleGroup.props.children?.push) {
+          middleGroup.props.children.push(viewRawButton);
+        }
+        return;
+      }
+
+      // Case 3: No groups found - just log and skip
+      console.log("[ViewRaw] Could not find ActionSheet - skipping");
+    });
+  });
+});
+
+export const onUnload = () => unpatch();
