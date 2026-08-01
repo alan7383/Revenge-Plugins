@@ -1,33 +1,10 @@
 import { findByProps } from "@vendetta/metro";
 import { before, after } from "@vendetta/patcher";
-import { React } from "@vendetta/metro/common";
 import { findInReactTree } from "@vendetta/utils";
-import { getAssetIDByName } from "@vendetta/ui/assets";
 
 const ActionSheet = findByProps("openLazy", "hideActionSheet");
-const { ActionSheetRow } = findByProps("ActionSheetRow");
-
-const ClipboardUtils = findByProps("SUPPORTS_COPY", "copy");
-const ToastPresets = findByProps("presentCopiedToClipboard");
-
-const IdIcon =
-    getAssetIDByName("ic_id") ??
-    getAssetIDByName("IdIcon") ??
-    getAssetIDByName("id");
 
 let unpatches: (() => void)[] = [];
-
-function safeCopy(text: string) {
-    try {
-        if (ClipboardUtils?.copy) {
-            ClipboardUtils.copy(text);
-        } else if (ClipboardUtils?.copyToClipboard) {
-            ClipboardUtils.copyToClipboard(text);
-        }
-    } catch (e) {
-        console.error("[CopyUserID] Copy failed:", e);
-    }
-}
 
 export default {
     onLoad() {
@@ -42,17 +19,15 @@ export default {
                     return;
                 }
 
-                // Store current active message on the lazy instance so onPress always sees the latest target
                 comp.then((instance: any) => {
-                    instance.__currentActiveMessage = msg.message;
-
-                    if (instance.__patchedForCopyId) return;
-                    instance.__patchedForCopyId = true;
+                    if (instance.__patchedForMoveForward) return;
+                    instance.__patchedForMoveForward = true;
 
                     const unpatchDefault = after(
                         "default",
                         instance,
                         (_args: any, component: any) => {
+                            // Find all action sheet row groups
                             const groups: any[] = findInReactTree(
                                 component,
                                 (c: any) =>
@@ -62,41 +37,88 @@ export default {
 
                             if (!groups?.length) return;
 
-                            const alreadyExists = findInReactTree(
-                                component,
-                                (c: any) => c?.props?.label === "Copy User ID"
-                            );
-                            if (alreadyExists) return;
+                            let nativeForwardButton: any = null;
+                            let nativeGroupChildren: any[] | null = null;
+                            let nativeIndex = -1;
 
-                            const copyIdButton = React.createElement(
-                                ActionSheetRow,
-                                {
-                                    label: "Copy User ID",
-                                    icon: React.createElement(
-                                        ActionSheetRow.Icon,
-                                        { source: IdIcon }
-                                    ),
-                                    onPress: () => {
-                                        // Read dynamically from the active message instance
-                                        const currentAuthorId =
-                                            instance.__currentActiveMessage?.author?.id;
+                            // 1. Locate Discord's native Forward button across all groups
+                            for (const g of groups) {
+                                const children: any[] = findInReactTree(
+                                    g,
+                                    (c: any) =>
+                                        Array.isArray(c) &&
+                                        c.some(
+                                            (child: any) =>
+                                                child?.type?.name === "ActionSheetRow"
+                                        )
+                                );
 
-                                        ActionSheet.hideActionSheet();
+                                if (children) {
+                                    const idx = children.findIndex(
+                                        (child: any) =>
+                                            child?.props?.label === "Forward" ||
+                                            child?.props?.label === "Forward Message"
+                                    );
 
-                                        if (!currentAuthorId) return;
-
-                                        setTimeout(() => {
-                                            safeCopy(currentAuthorId);
-                                            ToastPresets?.presentCopiedToClipboard?.();
-                                        }, 100);
+                                    if (idx !== -1) {
+                                        nativeForwardButton = children[idx];
+                                        nativeGroupChildren = children;
+                                        nativeIndex = idx;
+                                        break;
                                     }
                                 }
+                            }
+
+                            if (!nativeForwardButton || !nativeGroupChildren) return;
+
+                            // 2. Locate the group containing "Copy User ID"
+                            let copyIdGroupChildren: any[] | null = null;
+
+                            for (const g of groups) {
+                                const children: any[] = findInReactTree(
+                                    g,
+                                    (c: any) =>
+                                        Array.isArray(c) &&
+                                        c.some(
+                                            (child: any) =>
+                                                child?.props?.label === "Copy User ID"
+                                        )
+                                );
+
+                                if (children) {
+                                    copyIdGroupChildren = children;
+                                    break;
+                                }
+                            }
+
+                            // Fallback to top group if Copy User ID group isn't found
+                            const targetGroupChildren = copyIdGroupChildren ?? findInReactTree(
+                                groups[0],
+                                (c: any) =>
+                                    Array.isArray(c) &&
+                                    c.some(
+                                        (child: any) =>
+                                            child?.type?.name === "ActionSheetRow"
+                                    )
                             );
 
-                            // Create a new group at the very top with just the copy button
-                            groups.unshift(
-                                React.createElement(ActionSheetRow.Group, null, copyIdButton)
+                            if (!targetGroupChildren) return;
+
+                            // Find position of Copy User ID button within that group
+                            const copyIdIdx = targetGroupChildren.findIndex(
+                                (child: any) => child?.props?.label === "Copy User ID"
                             );
+
+                            const targetIndex = copyIdIdx !== -1 ? copyIdIdx + 1 : 0;
+
+                            // Avoid duplicate moves if it's already in the correct slot
+                            if (targetGroupChildren[targetIndex] === nativeForwardButton) return;
+
+                            // 3. Remove native Forward from its original position
+                            nativeGroupChildren.splice(nativeIndex, 1);
+
+                            // 4. Place native Forward directly under Copy User ID
+                            targetGroupChildren.splice(targetIndex, 0, nativeForwardButton);
                         }
                     );
 
