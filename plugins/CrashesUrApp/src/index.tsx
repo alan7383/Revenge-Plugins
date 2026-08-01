@@ -15,106 +15,108 @@ const Navigator =
   findByName("Navigator") ?? findByProps("Navigator")?.Navigator;
 const { FormRow, FormIcon } = Forms;
 
-const unpatch = before("openLazy", LazyActionSheet, ([component, key, msg]) => {
-  const message = msg?.message;
-  if (key !== "MessageLongPressActionSheet" || !message) return;
-  
-  component.then((instance) => {
-    // ✅ REMOVE THIS - it's preventing the button from showing after first press
-    // if (instance.__patchedForViewRaw) return;
-    // instance.__patchedForViewRaw = true;
+export default {
+  onLoad() {
+    const unpatch = before("openLazy", LazyActionSheet, ([component, key, msg]) => {
+      const message = msg?.message;
+      if (key !== "MessageLongPressActionSheet" || !message) return;
 
-    const unpatch = after("default", instance, (_, component) => {
-      React.useEffect(
-        () => () => {
-          unpatch();
-        },
-        [],
-      );
+      component.then((instance) => {
+        // ✅ No __patchedForViewRaw flag - patch every time like SilentDelete!
+        const unpatchAfter = after("default", instance, (_, component) => {
+          // Self-cleaning patch - removed after sheet unmounts
+          React.useEffect(() => () => { unpatchAfter(); }, []);
 
-      const navigator = () => (
-        <Navigator
-          initialRouteName="RawPage"
-          goBackOnBackPress
-          screens={{
-            RawPage: {
-              title: "ViewRaw",
-              headerLeft: modalCloseButton?.(() => Navigation.pop()),
-              render: () => <RawPage message={message} />,
-            },
-          }}
-        />
-      );
+          const navigator = () => (
+            <Navigator
+              initialRouteName="RawPage"
+              goBackOnBackPress
+              screens={{
+                RawPage: {
+                  title: "ViewRaw",
+                  headerLeft: modalCloseButton?.(() => Navigation.pop()),
+                  render: () => <RawPage message={message} />,
+                },
+              }}
+            />
+          );
 
-      const actionSheetContainer = findInReactTree(
-        component,
-        (x) => Array.isArray(x) && x[0]?.type?.name === "ActionSheetRowGroup",
-      );
-      const buttons = findInReactTree(
-        component,
-        (x) => x?.[0]?.type?.name === "ButtonRow",
-      );
+          const actionSheetContainer = findInReactTree(
+            component,
+            (x) => Array.isArray(x) && x[0]?.type?.name === "ActionSheetRowGroup",
+          );
+          const buttons = findInReactTree(
+            component,
+            (x) => x?.[0]?.type?.name === "ButtonRow",
+          );
 
-      // Case 1: Found ButtonRow - push to end
-      if (buttons?.push) {
-        buttons.push(
-          <FormRow
-            label="View Raw"
-            leading={
-              <FormIcon
-                style={{ opacity: 1 }}
-                source={getAssetIDByName("ic_chat_bubble_16px")}
-              />
-            }
-            onPress={() => {
-              LazyActionSheet.hideActionSheet();
-              Navigation.push(navigator);
-            }}
-          />
-        );
-        return;
-      }
-
-      // Case 2: Found ActionSheetRowGroup with children
-      if (actionSheetContainer?.[1]?.props?.children?.[0]?.props?.icon) {
-        const middleGroup = actionSheetContainer[1];
-        const firstChild = middleGroup.props.children[0];
-        const ActionSheetRow = firstChild.type;
-
-        const viewRawButton = (
-          <ActionSheetRow
-            label="View Raw"
-            icon={{
-              $$typeof: firstChild.props.icon.$$typeof,
-              type: firstChild.props.icon.type,
-              key: null,
-              ref: null,
-              props: {
-                IconComponent: () => (
+          // Case 1: Found ButtonRow - push to end
+          if (buttons?.push) {
+            buttons.push(
+              <FormRow
+                label="View Raw"
+                leading={
                   <FormIcon
                     style={{ opacity: 1 }}
-                    source={getAssetIDByName("ic_chat_bubble_32px")}
+                    source={getAssetIDByName("ic_chat_bubble_16px")}
                   />
-                ),
-              },
-            }}
-            onPress={() => {
-              LazyActionSheet.hideActionSheet();
-              Navigation.push(navigator);
-            }}
-            key="view-raw"
-          />
-        );
+                }
+                onPress={() => {
+                  LazyActionSheet.hideActionSheet();
+                  Navigation.push(navigator);
+                }}
+              />
+            );
+            return;
+          }
 
-        if (middleGroup.props.children?.push) {
-          middleGroup.props.children.push(viewRawButton);
-        }
-        return;
-      }
+          // Case 2: Found ActionSheetRowGroup with children
+          if (actionSheetContainer?.[1]?.props?.children?.[0]?.props?.icon) {
+            const middleGroup = actionSheetContainer[1];
+            const firstChild = middleGroup.props.children[0];
+            const ActionSheetRow = firstChild.type;
 
-      console.log("[ViewRaw] Could not find ActionSheet - skipping");
+            const viewRawButton = (
+              <ActionSheetRow
+                label="View Raw"
+                icon={{
+                  $$typeof: firstChild.props.icon.$$typeof,
+                  type: firstChild.props.icon.type,
+                  key: null,
+                  ref: null,
+                  props: {
+                    IconComponent: () => (
+                      <FormIcon
+                        style={{ opacity: 1 }}
+                        source={getAssetIDByName("ic_chat_bubble_32px")}
+                      />
+                    ),
+                  },
+                }}
+                onPress={() => {
+                  LazyActionSheet.hideActionSheet();
+                  Navigation.push(navigator);
+                }}
+                key="view-raw"
+              />
+            );
+
+            if (middleGroup.props.children?.push) {
+              middleGroup.props.children.push(viewRawButton);
+            }
+            return;
+          }
+
+          console.log("[ViewRaw] Could not find ActionSheet - skipping");
+        });
+      });
     });
-  });
-});
 
-export const onUnload = () => unpatch();
+    // Store unpatch for cleanup
+    this._unpatch = unpatch;
+  },
+
+  onUnload() {
+    this._unpatch?.();
+  }
+};
