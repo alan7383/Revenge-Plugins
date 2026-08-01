@@ -15,16 +15,16 @@ const Navigator =
   findByName("Navigator") ?? findByProps("Navigator")?.Navigator;
 const { FormRow, FormIcon } = Forms;
 
+let viewRawUnpatch: (() => void) | null = null;
+
 export default {
   onLoad() {
-    const unpatch = before("openLazy", LazyActionSheet, ([component, key, msg]) => {
+    viewRawUnpatch = before("openLazy", LazyActionSheet, ([component, key, msg]) => {
       const message = msg?.message;
       if (key !== "MessageLongPressActionSheet" || !message) return;
 
       component.then((instance) => {
-        // ✅ No __patchedForViewRaw flag - patch every time like SilentDelete!
         const unpatchAfter = after("default", instance, (_, component) => {
-          // Self-cleaning patch - removed after sheet unmounts
           React.useEffect(() => () => { unpatchAfter(); }, []);
 
           const navigator = () => (
@@ -41,6 +41,23 @@ export default {
             />
           );
 
+          const viewRawButton = (
+            <FormRow
+              label="View Raw"
+              leading={
+                <FormIcon
+                  style={{ opacity: 1 }}
+                  source={getAssetIDByName("ic_chat_bubble_16px")}
+                />
+              }
+              onPress={() => {
+                LazyActionSheet.hideActionSheet();
+                Navigation.push(navigator);
+              }}
+            />
+          );
+
+          // Try to find a place to insert the button
           const actionSheetContainer = findInReactTree(
             component,
             (x) => Array.isArray(x) && x[0]?.type?.name === "ActionSheetRowGroup",
@@ -50,73 +67,85 @@ export default {
             (x) => x?.[0]?.type?.name === "ButtonRow",
           );
 
-          // Case 1: Found ButtonRow - push to end
+          let inserted = false;
+
+          // Case 1: Try ButtonRow
           if (buttons?.push) {
-            buttons.push(
-              <FormRow
-                label="View Raw"
-                leading={
-                  <FormIcon
-                    style={{ opacity: 1 }}
-                    source={getAssetIDByName("ic_chat_bubble_16px")}
-                  />
-                }
-                onPress={() => {
-                  LazyActionSheet.hideActionSheet();
-                  Navigation.push(navigator);
-                }}
-              />
-            );
-            return;
-          }
-
-          // Case 2: Found ActionSheetRowGroup with children
-          if (actionSheetContainer?.[1]?.props?.children?.[0]?.props?.icon) {
-            const middleGroup = actionSheetContainer[1];
-            const firstChild = middleGroup.props.children[0];
-            const ActionSheetRow = firstChild.type;
-
-            const viewRawButton = (
-              <ActionSheetRow
-                label="View Raw"
-                icon={{
-                  $$typeof: firstChild.props.icon.$$typeof,
-                  type: firstChild.props.icon.type,
-                  key: null,
-                  ref: null,
-                  props: {
-                    IconComponent: () => (
-                      <FormIcon
-                        style={{ opacity: 1 }}
-                        source={getAssetIDByName("ic_chat_bubble_32px")}
-                      />
-                    ),
-                  },
-                }}
-                onPress={() => {
-                  LazyActionSheet.hideActionSheet();
-                  Navigation.push(navigator);
-                }}
-                key="view-raw"
-              />
-            );
-
-            if (middleGroup.props.children?.push) {
-              middleGroup.props.children.push(viewRawButton);
+            // Remove existing ViewRaw button if it exists
+            const existingIdx = buttons.findIndex((b: any) => b?.props?.label === "View Raw");
+            if (existingIdx !== -1) {
+              buttons.splice(existingIdx, 1);
             }
-            return;
+            buttons.push(viewRawButton);
+            inserted = true;
           }
 
-          console.log("[ViewRaw] Could not find ActionSheet - skipping");
+          // Case 2: Try ActionSheetRowGroup
+          if (!inserted && actionSheetContainer?.[1]?.props?.children?.push) {
+            const middleGroup = actionSheetContainer[1];
+            const children = Array.isArray(middleGroup.props.children) 
+              ? middleGroup.props.children 
+              : [middleGroup.props.children];
+            
+            // Remove existing ViewRaw button if it exists
+            const existingIdx = children.findIndex((c: any) => c?.props?.label === "View Raw");
+            if (existingIdx !== -1) {
+              children.splice(existingIdx, 1);
+            }
+
+            const firstChild = children[0];
+            if (firstChild?.props?.icon) {
+              const ActionSheetRow = firstChild.type;
+              const viewRawActionSheetButton = (
+                <ActionSheetRow
+                  label="View Raw"
+                  icon={{
+                    $$typeof: firstChild.props.icon.$$typeof,
+                    type: firstChild.props.icon.type,
+                    key: null,
+                    ref: null,
+                    props: {
+                      IconComponent: () => (
+                        <FormIcon
+                          style={{ opacity: 1 }}
+                          source={getAssetIDByName("ic_chat_bubble_32px")}
+                        />
+                      ),
+                    },
+                  }}
+                  onPress={() => {
+                    LazyActionSheet.hideActionSheet();
+                    Navigation.push(navigator);
+                  }}
+                  key="view-raw"
+                />
+              );
+              middleGroup.props.children.push(viewRawActionSheetButton);
+              inserted = true;
+            }
+          }
+
+          // Case 3: Create new group at the end
+          if (!inserted && actionSheetContainer?.push) {
+            const newGroup = React.createElement(
+              findByProps("ActionSheetRowGroup")?.ActionSheetRowGroup || "View",
+              null,
+              viewRawButton
+            );
+            actionSheetContainer.push(newGroup);
+            inserted = true;
+          }
+
+          if (!inserted) {
+            console.log("[ViewRaw] Could not insert button");
+          }
         });
       });
     });
-
-    // Store unpatch for cleanup
-    this._unpatch = unpatch;
   },
 
   onUnload() {
-    this._unpatch?.();
+    viewRawUnpatch?.();
+    viewRawUnpatch = null;
   }
 };
