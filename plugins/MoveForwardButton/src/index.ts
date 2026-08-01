@@ -85,19 +85,7 @@ export default {
                             );
                             if (alreadyExists) return;
 
-                            // 3. Find the children array inside Fast Copy ID's newly created group (groups[0])
-                            const topGroupChildren: any[] = findInReactTree(
-                                groups[0],
-                                (c: any) =>
-                                    Array.isArray(c) &&
-                                    c.some(
-                                        (child: any) =>
-                                            child?.type?.name ===
-                                            "ActionSheetRow"
-                                    )
-                            );
-
-                            // 4. Create Forward row
+                            // 3. Create Forward row
                             const forwardButton = React.createElement(
                                 ActionSheetRow,
                                 {
@@ -124,20 +112,71 @@ export default {
                                 }
                             );
 
-                            // 5. If top group exists, append inside it. Otherwise, create a new top group for Forward.
-                            if (topGroupChildren) {
-                                const copyIdIdx = topGroupChildren.findIndex(
-                                    (c: any) => c?.props?.label === "Copy User ID"
+                            // 4. Check if the first group exists and has the Copy User ID button
+                            const firstGroup = groups[0];
+                            if (firstGroup) {
+                                // Find children in the first group
+                                const groupChildren: any[] = findInReactTree(
+                                    firstGroup,
+                                    (c: any) =>
+                                        Array.isArray(c) &&
+                                        c.some(
+                                            (child: any) =>
+                                                child?.type?.name === "ActionSheetRow"
+                                        )
                                 );
 
-                                if (copyIdIdx !== -1) {
-                                    topGroupChildren.splice(copyIdIdx + 1, 0, forwardButton);
+                                if (groupChildren) {
+                                    const copyIdIdx = groupChildren.findIndex(
+                                        (c: any) => c?.props?.label === "Copy User ID"
+                                    );
+
+                                    if (copyIdIdx !== -1) {
+                                        // Insert Forward button right after Copy User ID
+                                        groupChildren.splice(copyIdIdx + 1, 0, forwardButton);
+                                    } else {
+                                        // If no Copy User ID, just add to the group
+                                        groupChildren.push(forwardButton);
+                                    }
                                 } else {
-                                    topGroupChildren.push(forwardButton);
+                                    // If the group exists but has no children, add both buttons
+                                    const newGroup = React.createElement(
+                                        ActionSheetRow.Group,
+                                        null,
+                                        React.createElement(
+                                            ActionSheetRow,
+                                            {
+                                                label: "Copy User ID",
+                                                icon: React.createElement(
+                                                    ActionSheetRow.Icon,
+                                                    { source: getAssetIDByName("ic_id") }
+                                                ),
+                                                onPress: () => {}
+                                            }
+                                        ),
+                                        forwardButton
+                                    );
+                                    groups[0] = newGroup;
                                 }
                             } else {
+                                // Create a new group at the top with both buttons
                                 groups.unshift(
-                                    React.createElement(ActionSheetRow.Group, null, forwardButton)
+                                    React.createElement(
+                                        ActionSheetRow.Group,
+                                        null,
+                                        React.createElement(
+                                            ActionSheetRow,
+                                            {
+                                                label: "Copy User ID",
+                                                icon: React.createElement(
+                                                    ActionSheetRow.Icon,
+                                                    { source: getAssetIDByName("ic_id") }
+                                                ),
+                                                onPress: () => {}
+                                            }
+                                        ),
+                                        forwardButton
+                                    )
                                 );
                             }
                         }
