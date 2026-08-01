@@ -56,6 +56,7 @@ const unpatch = before("openLazy", LazyActionSheet, ([component, key, msg]) => {
       );
 
       if (buttons && Array.isArray(buttons)) {
+        // Push to end instead of start to put it at bottom
         buttons.push(
           <FormRow
             label="View Raw"
@@ -112,8 +113,10 @@ const unpatch = before("openLazy", LazyActionSheet, ([component, key, msg]) => {
         );
 
         if (Array.isArray(middleGroup.props.children)) {
+          // Push to end to put it at bottom
           middleGroup.props.children.push(viewRawButton);
         } else {
+          // If single child, make it an array with viewRaw at the end
           middleGroup.props.children = [middleGroup.props.children, viewRawButton];
         }
       } else {
