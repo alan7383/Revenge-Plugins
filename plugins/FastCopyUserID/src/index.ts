@@ -5,7 +5,7 @@ import { findInReactTree } from "@vendetta/utils";
 import { getAssetIDByName } from "@vendetta/ui/assets";
 
 const ActionSheet = findByProps("openLazy", "hideActionSheet");
-const { ActionSheetRow } = findByProps("ActionSheetRow");
+const { ActionSheetRow, ActionSheetRowGroup } = findByProps("ActionSheetRow", "ActionSheetRowGroup");
 
 const ClipboardUtils = findByProps("SUPPORTS_COPY", "copy");
 const ToastPresets = findByProps("presentCopiedToClipboard");
@@ -59,36 +59,16 @@ export default {
                                     c[0]?.type?.name === "ActionSheetRowGroup"
                             );
 
-                            if (!groups?.length) return;
+                            if (!groups) return;
 
+                            // Prevent injecting multiple times
                             const alreadyExists = findInReactTree(
                                 component,
                                 (c: any) => c?.props?.label === "Copy User ID"
                             );
                             if (alreadyExists) return;
 
-                            let targetGroupChildren: any[] | null = null;
-
-                            for (const g of groups) {
-                                const children: any[] = findInReactTree(
-                                    g,
-                                    (c: any) =>
-                                        Array.isArray(c) &&
-                                        c.some(
-                                            (child: any) =>
-                                                child?.type?.name ===
-                                                "ActionSheetRow"
-                                        )
-                                );
-
-                                if (children?.length) {
-                                    targetGroupChildren = children;
-                                    break;
-                                }
-                            }
-
-                            if (!targetGroupChildren) return;
-
+                            // 1. Create the Copy User ID button
                             const copyIdButton = React.createElement(
                                 ActionSheetRow,
                                 {
@@ -113,8 +93,15 @@ export default {
                                 }
                             );
 
-                            // Insert Copy User ID at the top (index 0)
-                            targetGroupChildren.unshift(copyIdButton);
+                            // 2. Wrap it inside its OWN ActionSheetRowGroup
+                            const customGroup = React.createElement(
+                                ActionSheetRowGroup,
+                                null,
+                                copyIdButton
+                            );
+
+                            // 3. Unshift the NEW group so it sits entirely isolated at the top
+                            groups.unshift(customGroup);
                         }
                     );
 
