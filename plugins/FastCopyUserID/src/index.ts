@@ -52,6 +52,7 @@ export default {
                         "default",
                         instance,
                         (_args: any, component: any) => {
+                            // Use optional chaining for groups
                             const groups: any[] = findInReactTree(
                                 component,
                                 (c: any) =>
@@ -59,6 +60,7 @@ export default {
                                     c[0]?.type?.name === "ActionSheetRowGroup"
                             );
 
+                            // Skip if no groups
                             if (!groups?.length) return;
 
                             const alreadyExists = findInReactTree(
@@ -92,9 +94,14 @@ export default {
                             );
 
                             // Create a new group at the very top with just the copy button
-                            groups.unshift(
-                                React.createElement(ActionSheetRow.Group, null, copyIdButton)
-                            );
+                            // Use optional chaining for groups.unshift
+                            if (groups?.unshift) {
+                                groups.unshift(
+                                    React.createElement(ActionSheetRow.Group, null, copyIdButton)
+                                );
+                            } else {
+                                console.log("[CopyUserID] Could not insert button - skipping");
+                            }
                         }
                     );
 
