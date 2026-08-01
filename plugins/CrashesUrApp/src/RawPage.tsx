@@ -2,29 +2,42 @@ import { ReactNative, clipboard, React } from "@vendetta/metro/common"
 import { showToast } from "@vendetta/ui/toasts"
 import { getAssetIDByName } from "@vendetta/ui/assets"
 import { Codeblock, Button } from "@vendetta/ui/components"
+import { cleanMessage } from "./cleanMessage"
 
 const { ScrollView } = ReactNative
 
 export default function RawPage({ message }) {
-    // Add null check early
-    if (!message) {
+    // Process message through cleanMessage
+    const processedMessage = React.useMemo(() => {
+        if (!message) {
+            console.warn("[ViewRaw] No message provided")
+            return null
+        }
+        return cleanMessage(message)
+    }, [message?.id, message])
+
+    const stringMessage = React.useMemo(() => {
+        if (!processedMessage) {
+            return "Error: No message data available"
+        }
+        try {
+            return JSON.stringify(processedMessage, null, 4)
+        } catch (e) {
+            console.error("[ViewRaw] Failed to stringify message:", e)
+            return "Error: Failed to serialize message"
+        }
+    }, [processedMessage])
+
+    const style = { marginBottom: 8 }
+
+    // If no message, show error
+    if (!processedMessage) {
         return (
             <ScrollView style={{ flex: 1, marginHorizontal: 13, marginVertical: 10 }}>
                 <Codeblock>Error: No message data available</Codeblock>
             </ScrollView>
         )
     }
-
-    const stringMessage = React.useMemo(() => {
-        try {
-            return JSON.stringify(message, null, 4)
-        } catch (e) {
-            console.error("[ViewRaw] Failed to stringify message:", e)
-            return "Error: Failed to serialize message"
-        }
-    }, [message?.id, message])
-
-    const style = { marginBottom: 8 }
 
     return (
         <ScrollView style={{ flex: 1, marginHorizontal: 13, marginVertical: 10 }}>
