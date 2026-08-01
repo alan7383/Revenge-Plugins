@@ -113,6 +113,7 @@ export default {
                                 }
                             );
 
+                            // Insert Copy User ID at the top (index 0)
                             targetGroupChildren.unshift(copyIdButton);
                         }
                     );
@@ -132,4 +133,3 @@ export default {
         unpatches = [];
     }
 };
-            
