@@ -14,6 +14,7 @@ const modalCloseButton =
 const Navigator =
   findByName("Navigator") ?? findByProps("Navigator")?.Navigator;
 const { FormRow, FormIcon } = Forms;
+const { ActionSheetRow } = findByProps("ActionSheetRow");
 
 let viewRawUnpatch: (() => void) | null = null;
 
@@ -95,9 +96,9 @@ export default {
 
             const firstChild = children[0];
             if (firstChild?.props?.icon) {
-              const ActionSheetRow = firstChild.type;
+              const ActionSheetRowComponent = firstChild.type;
               const viewRawActionSheetButton = (
-                <ActionSheetRow
+                <ActionSheetRowComponent
                   label="View Raw"
                   icon={{
                     $$typeof: firstChild.props.icon.$$typeof,
@@ -125,10 +126,11 @@ export default {
             }
           }
 
-          // Case 3: Create new group at the end
+          // Case 3: Create new group at the end - use ActionSheetRow.Group directly
           if (!inserted && actionSheetContainer?.push) {
+            // Use ActionSheetRow.Group instead of trying to find it
             const newGroup = React.createElement(
-              findByProps("ActionSheetRowGroup")?.ActionSheetRowGroup || "View",
+              ActionSheetRow.Group,
               null,
               viewRawButton
             );
