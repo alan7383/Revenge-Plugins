@@ -111,19 +111,37 @@ const unpatch = before("openLazy", LazyActionSheet, ([component, key, msg]) => {
             key="view-raw"
           />
         );
-
-        if (Array.isArray(middleGroup.props.children)) {
-          // Push to end to put it at bottom
-          middleGroup.props.children.push(viewRawButton);
-        } else {
-          // If single child, make it an array with viewRaw at the end
-          middleGroup.props.children = [middleGroup.props.children, viewRawButton];
-        }
-      } else {
-        console.log("[ViewRaw] Error: Could not find ActionSheet");
-      }
-    });
-  });
-});
-
-export const onUnload = () => unpatch();
+if (actionSheetContainer?.[1]?.props?.children?.[0]?.props?.icon) {
+    const middleGroup = actionSheetContainer[1];
+    const firstChild = middleGroup.props.children[0];
+    const ActionSheetRow = firstChild.type;
+    
+    const viewRawButton = (
+        <ActionSheetRow
+            label="View Raw"
+            icon={{
+                $$typeof: firstChild.props.icon.$$typeof,
+                type: firstChild.props.icon.type,
+                key: null,
+                ref: null,
+                props: {
+                    IconComponent: () => (
+                        <FormIcon
+                            style={{ opacity: 1 }}
+                            source={getAssetIDByName("ic_chat_bubble_32px")}
+                        />
+                    ),
+                },
+            }}
+            onPress={() => {
+                LazyActionSheet.hideActionSheet();
+                Navigation.push(navigator);
+            }}
+            key="view-raw"
+        />
+    );
+    
+    if (middleGroup.props.children?.push) {
+        middleGroup.props.children.push(viewRawButton);
+    }
+}
