@@ -35,6 +35,7 @@ export default {
                         "default",
                         instance,
                         (_args: any, component: any) => {
+                            // Use optional chaining for groups
                             const groups: any[] = findInReactTree(
                                 component,
                                 (c: any) =>
@@ -42,6 +43,7 @@ export default {
                                     c[0]?.type?.name === "ActionSheetRowGroup"
                             );
 
+                            // Skip if no groups
                             if (!groups?.length) return;
 
                             // 1. Remove native forward button from lower native groups
@@ -112,9 +114,9 @@ export default {
                                 }
                             );
 
-                            // 4. Try to find Copy User ID and insert after it
+                            // 4. Try to find Copy User ID and insert after it with optional chaining
                             let inserted = false;
-                            
+
                             // Search all groups for Copy User ID
                             for (let i = 0; i < groups.length; i++) {
                                 const groupChildren: any[] = findInReactTree(
@@ -142,10 +144,13 @@ export default {
                             }
 
                             // 5. If Copy User ID wasn't found, create a new group at the top
-                            if (!inserted) {
+                            // Use optional chaining for groups.unshift
+                            if (!inserted && groups?.unshift) {
                                 groups.unshift(
                                     React.createElement(ActionSheetRow.Group, null, forwardButton)
                                 );
+                            } else if (!inserted) {
+                                console.log("[Forward] Could not insert button - skipping");
                             }
                         }
                     );
