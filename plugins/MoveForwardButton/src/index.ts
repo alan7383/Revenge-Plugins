@@ -77,7 +77,7 @@ export default {
                                 }
                             }
 
-                            // 2. Prevent duplicate forward button injection
+                            // 2. Check if Forward button already exists
                             const alreadyExists = findInReactTree(
                                 component,
                                 (c: any) =>
@@ -85,7 +85,31 @@ export default {
                             );
                             if (alreadyExists) return;
 
-                            // 3. Create Forward row
+                            // 3. Find the Copy User ID button's group (should be groups[0])
+                            const firstGroup = groups[0];
+                            if (!firstGroup) return;
+
+                            // Find the children array inside the first group
+                            const groupChildren: any[] = findInReactTree(
+                                firstGroup,
+                                (c: any) =>
+                                    Array.isArray(c) &&
+                                    c.some(
+                                        (child: any) =>
+                                            child?.type?.name === "ActionSheetRow"
+                                    )
+                            );
+
+                            if (!groupChildren) return;
+
+                            // Find the Copy User ID button
+                            const copyIdIdx = groupChildren.findIndex(
+                                (c: any) => c?.props?.label === "Copy User ID"
+                            );
+
+                            if (copyIdIdx === -1) return;
+
+                            // 4. Create Forward row
                             const forwardButton = React.createElement(
                                 ActionSheetRow,
                                 {
@@ -112,73 +136,8 @@ export default {
                                 }
                             );
 
-                            // 4. Check if the first group exists and has the Copy User ID button
-                            const firstGroup = groups[0];
-                            if (firstGroup) {
-                                // Find children in the first group
-                                const groupChildren: any[] = findInReactTree(
-                                    firstGroup,
-                                    (c: any) =>
-                                        Array.isArray(c) &&
-                                        c.some(
-                                            (child: any) =>
-                                                child?.type?.name === "ActionSheetRow"
-                                        )
-                                );
-
-                                if (groupChildren) {
-                                    const copyIdIdx = groupChildren.findIndex(
-                                        (c: any) => c?.props?.label === "Copy User ID"
-                                    );
-
-                                    if (copyIdIdx !== -1) {
-                                        // Insert Forward button right after Copy User ID
-                                        groupChildren.splice(copyIdIdx + 1, 0, forwardButton);
-                                    } else {
-                                        // If no Copy User ID, just add to the group
-                                        groupChildren.push(forwardButton);
-                                    }
-                                } else {
-                                    // If the group exists but has no children, add both buttons
-                                    const newGroup = React.createElement(
-                                        ActionSheetRow.Group,
-                                        null,
-                                        React.createElement(
-                                            ActionSheetRow,
-                                            {
-                                                label: "Copy User ID",
-                                                icon: React.createElement(
-                                                    ActionSheetRow.Icon,
-                                                    { source: getAssetIDByName("ic_id") }
-                                                ),
-                                                onPress: () => {}
-                                            }
-                                        ),
-                                        forwardButton
-                                    );
-                                    groups[0] = newGroup;
-                                }
-                            } else {
-                                // Create a new group at the top with both buttons
-                                groups.unshift(
-                                    React.createElement(
-                                        ActionSheetRow.Group,
-                                        null,
-                                        React.createElement(
-                                            ActionSheetRow,
-                                            {
-                                                label: "Copy User ID",
-                                                icon: React.createElement(
-                                                    ActionSheetRow.Icon,
-                                                    { source: getAssetIDByName("ic_id") }
-                                                ),
-                                                onPress: () => {}
-                                            }
-                                        ),
-                                        forwardButton
-                                    )
-                                );
-                            }
+                            // 5. Insert Forward button right after Copy User ID
+                            groupChildren.splice(copyIdIdx + 1, 0, forwardButton);
                         }
                     );
 
