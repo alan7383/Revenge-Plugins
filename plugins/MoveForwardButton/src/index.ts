@@ -44,12 +44,84 @@ export default {
 
                             if (!groups?.length) return;
 
+                            // 1. Remove stock forward button to avoid doubles
+                            for (const g of groups) {
+                                const children: any[] = findInReactTree(
+                                    g,
+                                    (c: any) =>
+                                        Array.isArray(c) &&
+                                        c.some(
+                                            (child: any) =>
+                                                child?.type?.name ===
+                                                "ActionSheetRow"
+                                        )
+                                );
+
+                                if (children) {
+                                    const nativeIdx = children.findIndex(
+                                        (c: any) => {
+                                            const label = (
+                                                c?.props?.label || ""
+                                            ).toLowerCase();
+                                            return (
+                                                label === "forward" ||
+                                                label === "forward message"
+                                            );
+                                        }
+                                    );
+
+                                    if (nativeIdx !== -1) {
+                                        children.splice(nativeIdx, 1);
+                                        break;
+                                    }
+                                }
+                            }
+
+                            // 2. Avoid duplicate insertion
                             const alreadyExists = findInReactTree(
                                 component,
-                                (c: any) => c?.props?.label === "Forward Message"
+                                (c: any) =>
+                                    c?.props?.label === "Forward Message"
                             );
                             if (alreadyExists) return;
 
+                            // 3. Find the group holding Copy User ID
+                            let targetGroupChildren: any[] | null = null;
+                            let copyIdIndex = -1;
+
+                            for (const g of groups) {
+                                const children: any[] = findInReactTree(
+                                    g,
+                                    (c: any) =>
+                                        Array.isArray(c) &&
+                                        c.some(
+                                            (child: any) =>
+                                                child?.type?.name ===
+                                                "ActionSheetRow"
+                                        )
+                                );
+
+                                if (!children) continue;
+
+                                const foundCopyIdx = children.findIndex(
+                                    (c: any) =>
+                                        c?.props?.label === "Copy User ID"
+                                );
+
+                                if (foundCopyIdx !== -1) {
+                                    targetGroupChildren = children;
+                                    copyIdIndex = foundCopyIdx;
+                                    break;
+                                }
+
+                                if (!targetGroupChildren && children.length) {
+                                    targetGroupChildren = children;
+                                }
+                            }
+
+                            if (!targetGroupChildren) return;
+
+                            // 4. Create row
                             const forwardButton = React.createElement(
                                 ActionSheetRow,
                                 {
@@ -76,29 +148,14 @@ export default {
                                 }
                             );
 
-                            // Find group children array in groups[0]
-                            const groupChildren: any[] = findInReactTree(
-                                groups[0],
-                                (c: any) =>
-                                    Array.isArray(c) &&
-                                    c.some(
-                                        (child: any) =>
-                                            child?.type?.name ===
-                                            "ActionSheetRow"
-                                    )
+                            // 5. Splice right under Copy User ID
+                            const insertIndex =
+                                copyIdIndex !== -1 ? copyIdIndex + 1 : 1;
+                            targetGroupChildren.splice(
+                                insertIndex,
+                                0,
+                                forwardButton
                             );
-
-                            if (groupChildren) {
-                                const hasBtnInGroup = groupChildren.some(
-                                    (child: any) =>
-                                        child?.props?.label === "Forward Message"
-                                );
-
-                                if (!hasBtnInGroup) {
-                                    // Insert at index 1 so it sits right under "Copy User ID" (index 0)
-                                    groupChildren.splice(1, 0, forwardButton);
-                                }
-                            }
                         }
                     );
 
@@ -117,4 +174,3 @@ export default {
         unpatches = [];
     }
 };
-
