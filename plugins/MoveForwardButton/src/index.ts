@@ -85,31 +85,7 @@ export default {
                             );
                             if (alreadyExists) return;
 
-                            // 3. Find the Copy User ID button's group (should be groups[0])
-                            const firstGroup = groups[0];
-                            if (!firstGroup) return;
-
-                            // Find the children array inside the first group
-                            const groupChildren: any[] = findInReactTree(
-                                firstGroup,
-                                (c: any) =>
-                                    Array.isArray(c) &&
-                                    c.some(
-                                        (child: any) =>
-                                            child?.type?.name === "ActionSheetRow"
-                                    )
-                            );
-
-                            if (!groupChildren) return;
-
-                            // Find the Copy User ID button
-                            const copyIdIdx = groupChildren.findIndex(
-                                (c: any) => c?.props?.label === "Copy User ID"
-                            );
-
-                            if (copyIdIdx === -1) return;
-
-                            // 4. Create Forward row
+                            // 3. Create Forward row
                             const forwardButton = React.createElement(
                                 ActionSheetRow,
                                 {
@@ -136,8 +112,41 @@ export default {
                                 }
                             );
 
-                            // 5. Insert Forward button right after Copy User ID
-                            groupChildren.splice(copyIdIdx + 1, 0, forwardButton);
+                            // 4. Try to find Copy User ID and insert after it
+                            let inserted = false;
+                            
+                            // Search all groups for Copy User ID
+                            for (let i = 0; i < groups.length; i++) {
+                                const groupChildren: any[] = findInReactTree(
+                                    groups[i],
+                                    (c: any) =>
+                                        Array.isArray(c) &&
+                                        c.some(
+                                            (child: any) =>
+                                                child?.type?.name === "ActionSheetRow"
+                                        )
+                                );
+
+                                if (groupChildren) {
+                                    const copyIdIdx = groupChildren.findIndex(
+                                        (c: any) => c?.props?.label === "Copy User ID"
+                                    );
+
+                                    if (copyIdIdx !== -1) {
+                                        // Found Copy User ID, insert Forward after it
+                                        groupChildren.splice(copyIdIdx + 1, 0, forwardButton);
+                                        inserted = true;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            // 5. If Copy User ID wasn't found, create a new group at the top
+                            if (!inserted) {
+                                groups.unshift(
+                                    React.createElement(ActionSheetRow.Group, null, forwardButton)
+                                );
+                            }
                         }
                     );
 
