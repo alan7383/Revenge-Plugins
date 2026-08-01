@@ -5,7 +5,7 @@ import { findInReactTree } from "@vendetta/utils";
 import { getAssetIDByName } from "@vendetta/ui/assets";
 
 const ActionSheet = findByProps("openLazy", "hideActionSheet");
-const { ActionSheetRow, ActionSheetRowGroup } = findByProps("ActionSheetRow", "ActionSheetRowGroup");
+const { ActionSheetRow } = findByProps("ActionSheetRow");
 
 const ClipboardUtils = findByProps("SUPPORTS_COPY", "copy");
 const ToastPresets = findByProps("presentCopiedToClipboard");
@@ -59,16 +59,14 @@ export default {
                                     c[0]?.type?.name === "ActionSheetRowGroup"
                             );
 
-                            if (!groups) return;
+                            if (!groups?.length) return;
 
-                            // Prevent injecting multiple times
                             const alreadyExists = findInReactTree(
                                 component,
                                 (c: any) => c?.props?.label === "Copy User ID"
                             );
                             if (alreadyExists) return;
 
-                            // 1. Create the Copy User ID button
                             const copyIdButton = React.createElement(
                                 ActionSheetRow,
                                 {
@@ -93,15 +91,10 @@ export default {
                                 }
                             );
 
-                            // 2. Wrap it inside its OWN ActionSheetRowGroup
-                            const customGroup = React.createElement(
-                                ActionSheetRowGroup,
-                                null,
-                                copyIdButton
+                            // Create a new group at the very top with just the copy button
+                            groups.unshift(
+                                React.createElement(ActionSheetRow.Group, null, copyIdButton)
                             );
-
-                            // 3. Unshift the NEW group so it sits entirely isolated at the top
-                            groups.unshift(customGroup);
                         }
                     );
 
