@@ -3,7 +3,7 @@
     "description": "Fixes unresolved user mentions like @unknown-user to a normal clickable mention.",
     "authors": [
         {
-            "name": "fshin",
+            "name": "fshin, o.oer",
             "id": "1381008677301129257"
         }
     ],
