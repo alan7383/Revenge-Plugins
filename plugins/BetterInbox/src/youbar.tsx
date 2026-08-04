@@ -1,12 +1,12 @@
 import { findByProps, findByTypeName } from "@vendetta/metro";
-import { NavigationNative, React } from "@vendetta/metro/common";
+import { React } from "@vendetta/metro/common";
 import { instead } from "@vendetta/patcher";
 import { getAssetIDByName } from "@vendetta/ui/assets";
 import NotificationCenterUI from "./components/NotificationCenterUI";
 
-// Retrieve Discord's navigation utilities
-const Router = findByProps("push", "pop", "openLazy");
-const tabsNavigationRef = findByProps("getRootNavigationRef");
+// Retrieve Discord's Sheet & Modal modules
+const ActionSheet = findByProps("openLazy", "hideActionSheet");
+const ModalAction = findByProps("openModal", "openModalLazy");
 
 export function patchYouBar() {
   const YouBarNotificationsButton = findByTypeName("YouBarNotificationsButton");
@@ -26,48 +26,33 @@ export function patchYouBar() {
     const IconButton = res.props.children.type;
     const originalProps = res.props.children.props;
 
-    const openCustomPage = () => {
-      console.log("[BetterInbox] Intercepted YouBar click!");
+    const openModalSheet = () => {
+      console.log("[BetterInbox] Opening Notification Center Action Sheet...");
 
-      // Attempt 1: Discord Native Stack Push (openLazy)
-      if (Router?.openLazy) {
+      // Attempt 1: ActionSheet.openLazy (Standard Mobile Sheet Launcher)
+      if (ActionSheet?.openLazy) {
         try {
-          Router.openLazy(
+          ActionSheet.openLazy(
             async () => () => React.createElement(NotificationCenterUI),
-            "BetterInboxPage",
-            { title: "Better Inbox" }
+            "BetterInboxSheet"
           );
           return;
         } catch (err) {
-          console.error("[BetterInbox] openLazy failed:", err);
+          console.error("[BetterInbox] ActionSheet.openLazy failed:", err);
         }
       }
 
-      // Attempt 2: NavigationNative Push
-      const rootNav = tabsNavigationRef?.getRootNavigationRef?.();
-      if (rootNav?.push) {
+      // Attempt 2: ModalAction.openModalLazy (Fallback Fullscreen Sheet Modal)
+      if (ModalAction?.openModalLazy) {
         try {
-          rootNav.push("CustomPage", {
-            title: "Better Inbox",
-            render: () => React.createElement(NotificationCenterUI),
-          });
+          ModalAction.openModalLazy(async () => () => React.createElement(NotificationCenterUI));
           return;
         } catch (err) {
-          console.error("[BetterInbox] rootNav.push failed:", err);
+          console.error("[BetterInbox] ModalAction.openModalLazy failed:", err);
         }
       }
 
-      // Attempt 3: Direct NavigationNative navigate
-      if (NavigationNative?.navigate) {
-        try {
-          NavigationNative.navigate("VendettaCustomPage", {
-            title: "Better Inbox",
-            render: () => React.createElement(NotificationCenterUI),
-          });
-        } catch (err) {
-          console.error("[BetterInbox] NavigationNative.navigate failed:", err);
-        }
-      }
+      console.error("[BetterInbox] No modal sheet launchers available");
     };
 
     return (
@@ -75,7 +60,7 @@ export function patchYouBar() {
         variant={originalProps?.variant || "tertiary"}
         size={originalProps?.size || "sm"}
         icon={BellIcon || originalProps?.icon}
-        onPress={openCustomPage}
+        onPress={openModalSheet}
       />
     );
   });
