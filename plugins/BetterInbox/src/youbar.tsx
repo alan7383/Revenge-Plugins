@@ -1,10 +1,14 @@
-import { findByProps, findByTypeName } from "@vendetta/metro";
-import { React } from "@vendetta/metro/common";
+import { findByName, findByProps, findByTypeName } from "@vendetta/metro";
+import { React, ReactNative } from "@vendetta/metro/common";
 import { instead } from "@vendetta/patcher";
-import { getAssetIDByName } from "@vendetta/ui/assets";
+import { findInReactTree } from "@vendetta/utils";
 import NotificationCenterUI from "./components/NotificationCenterUI";
 
+const { TouchableOpacity } = ReactNative;
+
+// Get Discord's navigation ref and the native BellIcon
 const tabsNavigationRef = findByProps("getRootNavigationRef");
+const BellIcon = findByName("BellIcon") || findByProps("BellIcon")?.BellIcon;
 
 export function patchYouBar() {
   const YouBarNotificationsButton = findByTypeName("YouBarNotificationsButton");
@@ -14,43 +18,41 @@ export function patchYouBar() {
     return () => {};
   }
 
-  const BellIcon = getAssetIDByName("BellIcon") || getAssetIDByName("NotificationBellIcon");
-
+  // Replace the native button's render completely with our own custom component
   return instead("type", YouBarNotificationsButton, (args, OriginalRender) => {
-    const res = OriginalRender(...args);
+    // We grab the native props so we keep standard tab bar sizing/styles if needed
+    const props = args[0] || {};
 
-    if (!res?.props?.children) return res;
-
-    // Extract Discord's native IconButton component and its layout props
-    const IconButton = res.props.children.type;
-    const originalProps = res.props.children.props;
-
-    const openCustomPage = () => {
-      console.log("[BetterInbox] Intercepted YouBar click!");
+    const openCustomNotificationPage = () => {
+      console.log("[BetterInbox] Opening custom notification page via VendettaCustomPage");
 
       const navigation = tabsNavigationRef?.getRootNavigationRef?.();
-
       if (navigation?.navigate) {
-        try {
-          navigation.navigate("VendettaCustomPage", {
-            title: "Better Inbox",
-            render: () => React.createElement(NotificationCenterUI),
-          });
-          return;
-        } catch (err) {
-          console.error("[BetterInbox] Navigation error:", err);
-        }
+        navigation.navigate("VendettaCustomPage", {
+          title: "Inbox",
+          render: () => React.createElement(NotificationCenterUI),
+        });
       }
     };
 
-    // Render native IconButton with custom action
     return (
-      <IconButton
-        variant={originalProps?.variant || "tertiary"}
-        size={originalProps?.size || "sm"}
-        icon={BellIcon || originalProps?.icon}
-        onPress={openCustomPage}
-      />
+      <TouchableOpacity
+        onPress={openCustomNotificationPage}
+        style={{
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          paddingVertical: 5,
+        }}
+        activeOpacity={0.7}
+      >
+        {BellIcon ? (
+          <BellIcon color="#949ba4" size="24px" />
+        ) : (
+          // Fallback native render if BellIcon resolution fails
+          OriginalRender(...args)
+        )}
+      </TouchableOpacity>
     );
   });
 }
