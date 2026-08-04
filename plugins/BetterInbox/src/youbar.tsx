@@ -1,5 +1,5 @@
-import { findByProps, findByTypeName } from "@revenge-mod/metro";
-import { React } from "@revenge-mod/metro/common";
+import { findByProps, findByTypeName } from "@vendetta/metro";
+import { React } from "@vendetta/metro/common";
 import { instead } from "@vendetta/patcher";
 import { getAssetIDByName } from "@vendetta/ui/assets";
 import NotificationCenterUI from "./components/NotificationCenterUI";
@@ -21,16 +21,15 @@ export function patchYouBar() {
 
     if (!res?.props?.children) return res;
 
-    // Grab Discord's native IconButton component and its default props
+    // Extract Discord's native IconButton component and its layout props
     const IconButton = res.props.children.type;
     const originalProps = res.props.children.props;
 
     const openCustomPage = () => {
       console.log("[BetterInbox] Intercepted YouBar click!");
-      
+
       const navigation = tabsNavigationRef?.getRootNavigationRef?.();
-      
-      // Attempt 1: Standard Vendetta Custom Page route
+
       if (navigation?.navigate) {
         try {
           navigation.navigate("VendettaCustomPage", {
@@ -39,18 +38,12 @@ export function patchYouBar() {
           });
           return;
         } catch (err) {
-          console.error("[BetterInbox] VendettaCustomPage navigation failed:", err);
+          console.error("[BetterInbox] Navigation error:", err);
         }
-      }
-
-      // Fallback Attempt 2: Direct push via Discord's global navigation stack
-      const navModule = findByProps("push", "pop");
-      if (navModule?.push) {
-        navModule.push(NotificationCenterUI, { title: "Better Inbox" });
       }
     };
 
-    // Render ONLY our custom IconButton matching Discord's native dimensions
+    // Render native IconButton with custom action
     return (
       <IconButton
         variant={originalProps?.variant || "tertiary"}
