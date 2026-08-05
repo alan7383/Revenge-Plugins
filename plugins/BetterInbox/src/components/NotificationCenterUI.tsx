@@ -8,12 +8,10 @@ import {
   LocalStorage,
 } from "../types";
 
-const { View, Text, TouchableOpacity, ScrollView, Image, StyleSheet, SafeAreaView } = ReactNative;
+const { View, Text, TouchableOpacity, ScrollView, Image, StyleSheet } = ReactNative;
 const { useState } = React;
 
 const Router = findByProps("transitionToGuild", "transitionTo");
-const ActionSheet = findByProps("hideActionSheet");
-const ModalAction = findByProps("closeModal", "popWithKey");
 
 export default function NotificationCenterUI(): JSX.Element {
   if (typeof useProxy === "function" && storage) {
@@ -30,20 +28,6 @@ export default function NotificationCenterUI(): JSX.Element {
   const pluginStorage = (storage as LocalStorage) || { notifications: [] };
   const notifications: NotificationItem[] = pluginStorage.notifications || [];
 
-  // Dedicated dismissal for Action Sheets
-  const handleClose = () => {
-    try {
-      if (ActionSheet?.hideActionSheet) {
-        ActionSheet.hideActionSheet("BetterInboxSheet");
-      }
-      if (ModalAction?.closeModal) {
-        ModalAction.closeModal();
-      }
-    } catch (err) {
-      console.error("[BetterInbox] Failed to hide action sheet:", err);
-    }
-  };
-
   const filteredNotifications = notifications.filter((n) => {
     if (activeTab === "mentions") {
       if (n.category !== "mentions") return false;
@@ -57,8 +41,6 @@ export default function NotificationCenterUI(): JSX.Element {
 
   const jumpToMessage = (guildId?: string, channelId?: string, messageId?: string): void => {
     if (!channelId || !messageId) return;
-
-    handleClose(); // Close the modal sheet before jumping
 
     try {
       if (Router?.transitionToGuild) {
@@ -75,21 +57,8 @@ export default function NotificationCenterUI(): JSX.Element {
   const subFilters: Array<"all" | MentionSubCategory> = ["all", "people", "role", "bot"];
 
   return (
-    <SafeAreaView style={styles.sheetContainer}>
-      {/* Action Sheet Drag Indicator / Top Padding space */}
-      <View style={styles.dragHandleSpacer}>
-        <View style={styles.dragIndicator} />
-      </View>
-
-      {/* Action Sheet Header with Close Button */}
-      <View style={styles.sheetHeader}>
-        <Text style={styles.headerTitle}>Inbox</Text>
-        <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
-          <Text style={styles.closeButtonText}>✕</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Primary Category Bar */}
+    <View style={styles.container}>
+      {/* Category Bar */}
       <View style={styles.tabBar}>
         {tabs.map((tab) => (
           <TouchableOpacity
@@ -104,7 +73,7 @@ export default function NotificationCenterUI(): JSX.Element {
         ))}
       </View>
 
-      {/* Mentions Sub-Filter */}
+      {/* Sub-Filter Bar */}
       {activeTab === "mentions" && (
         <View style={styles.subFilterBar}>
           {subFilters.map((sub) => (
@@ -119,7 +88,7 @@ export default function NotificationCenterUI(): JSX.Element {
         </View>
       )}
 
-      {/* Notifications List */}
+      {/* Feed List */}
       <ScrollView style={styles.feed}>
         {filteredNotifications.length === 0 ? (
           <Text style={styles.emptyText}>No notifications found for this category.</Text>
@@ -157,52 +126,14 @@ export default function NotificationCenterUI(): JSX.Element {
           ))
         )}
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  sheetContainer: {
+  container: {
     flex: 1,
-    backgroundColor: "#1e1f22", // Matches native Discord bottom sheet background
-  },
-  dragHandleSpacer: {
-    alignItems: "center",
-    paddingVertical: 8,
-  },
-  dragIndicator: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: "#4e5058",
-  },
-  sheetHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingBottom: 10,
-    backgroundColor: "#1e1f22",
-  },
-  headerTitle: {
-    color: "#ffffff",
-    fontSize: 18,
-    fontWeight: "bold",
-  },
-  closeButton: {
-    padding: 6,
-    borderRadius: 16,
-    backgroundColor: "#2b2d31",
-    width: 30,
-    height: 30,
-    alignItems: "center",
-    justify.content: "center",
-  },
-  closeButtonText: {
-    color: "#dbdee1",
-    fontSize: 14,
-    fontWeight: "bold",
-    marginTop: -2,
+    backgroundColor: "#313338",
   },
   tabBar: { flexDirection: "row", backgroundColor: "#2b2d31", paddingVertical: 4 },
   tabButton: { flex: 1, paddingVertical: 10, alignItems: "center" },
@@ -213,7 +144,7 @@ const styles = StyleSheet.create({
   subFilterButton: { marginHorizontal: 6, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   activeSubFilter: { backgroundColor: "#404249" },
   subFilterText: { color: "#dbdee1", fontSize: 11, fontWeight: "bold" },
-  feed: { flex: 1, padding: 12, backgroundColor: "#313338" },
+  feed: { flex: 1, padding: 12 },
   emptyText: { color: "#949ba4", textAlign: "center", marginTop: 40, fontSize: 14 },
   card: {
     flexDirection: "row",
