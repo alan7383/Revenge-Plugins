@@ -1,12 +1,42 @@
 import { findByProps, findByTypeName } from "@vendetta/metro";
-import { NavigationNative, React } from "@vendetta/metro/common";
+import { React, ReactNative, NavigationNative } from "@vendetta/metro/common";
 import { instead } from "@vendetta/patcher";
 import { getAssetIDByName } from "@vendetta/ui/assets";
 import NotificationCenterUI from "./components/NotificationCenterUI";
 
-// Retrieve Discord's navigation utilities
-const Router = findByProps("push", "pop", "openLazy");
+const { View, Text, TouchableOpacity, SafeAreaView, StyleSheet } = ReactNative;
 const tabsNavigationRef = findByProps("getRootNavigationRef");
+
+// Custom Container that injects the Header + Close Button and Safe Area
+function PageWrapper() {
+  const handleClose = () => {
+    try {
+      const rootNav = tabsNavigationRef?.getRootNavigationRef?.();
+      if (rootNav?.goBack) {
+        rootNav.goBack();
+      } else if (NavigationNative?.goBack) {
+        NavigationNative.goBack();
+      }
+    } catch (err) {
+      console.error("[BetterInbox] Failed to navigate back:", err);
+    }
+  };
+
+  return (
+    <SafeAreaView style={styles.wrapper}>
+      {/* Page Header Bar with X Button */}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Better Inbox</Text>
+        <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
+          <Text style={styles.closeButtonText}>✕</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Main Inbox View */}
+      <NotificationCenterUI />
+    </SafeAreaView>
+  );
+}
 
 export function patchYouBar() {
   const YouBarNotificationsButton = findByTypeName("YouBarNotificationsButton");
@@ -26,46 +56,20 @@ export function patchYouBar() {
     const IconButton = res.props.children.type;
     const originalProps = res.props.children.props;
 
-    const openCustomPage = () => {
-      console.log("[BetterInbox] Intercepted YouBar click!");
+    const openPage = () => {
+      console.log("[BetterInbox] Opening Inbox Page...");
 
-      // Attempt 1: Discord Native Stack Push (openLazy)
-      if (Router?.openLazy) {
-        try {
-          Router.openLazy(
-            async () => () => React.createElement(NotificationCenterUI),
-            "BetterInboxPage",
-            { title: "Better Inbox" }
-          );
-          return;
-        } catch (err) {
-          console.error("[BetterInbox] openLazy failed:", err);
-        }
-      }
+      const navigation = tabsNavigationRef?.getRootNavigationRef?.();
 
-      // Attempt 2: NavigationNative Push
-      const rootNav = tabsNavigationRef?.getRootNavigationRef?.();
-      if (rootNav?.push) {
+      if (navigation?.navigate) {
         try {
-          rootNav.push("CustomPage", {
+          navigation.navigate("VendettaCustomPage", {
             title: "Better Inbox",
-            render: () => React.createElement(NotificationCenterUI),
+            render: () => React.createElement(PageWrapper),
           });
           return;
         } catch (err) {
-          console.error("[BetterInbox] rootNav.push failed:", err);
-        }
-      }
-
-      // Attempt 3: Direct NavigationNative navigate
-      if (NavigationNative?.navigate) {
-        try {
-          NavigationNative.navigate("VendettaCustomPage", {
-            title: "Better Inbox",
-            render: () => React.createElement(NotificationCenterUI),
-          });
-        } catch (err) {
-          console.error("[BetterInbox] NavigationNative.navigate failed:", err);
+          console.error("[BetterInbox] Navigation error:", err);
         }
       }
     };
@@ -75,8 +79,44 @@ export function patchYouBar() {
         variant={originalProps?.variant || "tertiary"}
         size={originalProps?.size || "sm"}
         icon={BellIcon || originalProps?.icon}
-        onPress={openCustomPage}
+        onPress={openPage}
       />
     );
   });
 }
+
+const styles = StyleSheet.create({
+  wrapper: {
+    flex: 1,
+    backgroundColor: "#1e1f22",
+  },
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: "#1e1f22",
+    borderBottomWidth: 1,
+    borderBottomColor: "#2b2d31",
+  },
+  headerTitle: {
+    color: "#ffffff",
+    fontSize: 18,
+    fontWeight: "bold",
+  },
+  closeButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#2b2d31",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  closeButtonText: {
+    color: "#dbdee1",
+    fontSize: 16,
+    fontWeight: "bold",
+    marginTop: -2,
+  },
+});
