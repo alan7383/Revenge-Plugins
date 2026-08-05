@@ -1,42 +1,15 @@
-import { findByProps, findByTypeName } from "@vendetta/metro";
-import { React, ReactNative, NavigationNative } from "@vendetta/metro/common";
+import { findByProps, findByTypeName, findByName } from "@vendetta/metro";
+import { React } from "@vendetta/metro/common";
 import { instead } from "@vendetta/patcher";
 import { getAssetIDByName } from "@vendetta/ui/assets";
 import NotificationCenterUI from "./components/NotificationCenterUI";
 
-const { View, Text, TouchableOpacity, SafeAreaView, StyleSheet } = ReactNative;
-const tabsNavigationRef = findByProps("getRootNavigationRef");
-
-// Custom Container that injects the Header + Close Button and Safe Area
-function PageWrapper() {
-  const handleClose = () => {
-    try {
-      const rootNav = tabsNavigationRef?.getRootNavigationRef?.();
-      if (rootNav?.goBack) {
-        rootNav.goBack();
-      } else if (NavigationNative?.goBack) {
-        NavigationNative.goBack();
-      }
-    } catch (err) {
-      console.error("[BetterInbox] Failed to navigate back:", err);
-    }
-  };
-
-  return (
-    <SafeAreaView style={styles.wrapper}>
-      {/* Page Header Bar with X Button */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Better Inbox</Text>
-        <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
-          <Text style={styles.closeButtonText}>✕</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Main Inbox View */}
-      <NotificationCenterUI />
-    </SafeAreaView>
-  );
-}
+// Retrieve Discord's native Navigator & Navigation modules
+const Navigation = findByProps("push", "pushLazy", "pop");
+const Navigator = findByName("Navigator") ?? findByProps("Navigator")?.Navigator;
+const modalCloseButton =
+  findByProps("getRenderCloseButton")?.getRenderCloseButton ??
+  findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
 
 export function patchYouBar() {
   const YouBarNotificationsButton = findByTypeName("YouBarNotificationsButton");
@@ -56,21 +29,28 @@ export function patchYouBar() {
     const IconButton = res.props.children.type;
     const originalProps = res.props.children.props;
 
-    const openPage = () => {
-      console.log("[BetterInbox] Opening Inbox Page...");
+    const openInboxNavigator = () => {
+      console.log("[BetterInbox] Launching native Navigator modal...");
 
-      const navigation = tabsNavigationRef?.getRootNavigationRef?.();
+      // Native Discord Modal Stack Navigator with Header & Native X Button
+      const InboxModal = () => (
+        <Navigator
+          initialRouteName="BetterInboxPage"
+          goBackOnBackPress
+          screens={{
+            BetterInboxPage: {
+              title: "Better Inbox",
+              headerLeft: modalCloseButton?.(() => Navigation.pop()),
+              render: () => <NotificationCenterUI />,
+            },
+          }}
+        />
+      );
 
-      if (navigation?.navigate) {
-        try {
-          navigation.navigate("VendettaCustomPage", {
-            title: "Better Inbox",
-            render: () => React.createElement(PageWrapper),
-          });
-          return;
-        } catch (err) {
-          console.error("[BetterInbox] Navigation error:", err);
-        }
+      if (Navigation?.push) {
+        Navigation.push(InboxModal);
+      } else {
+        console.error("[BetterInbox] Navigation.push module not available");
       }
     };
 
@@ -79,44 +59,8 @@ export function patchYouBar() {
         variant={originalProps?.variant || "tertiary"}
         size={originalProps?.size || "sm"}
         icon={BellIcon || originalProps?.icon}
-        onPress={openPage}
+        onPress={openInboxNavigator}
       />
     );
   });
 }
-
-const styles = StyleSheet.create({
-  wrapper: {
-    flex: 1,
-    backgroundColor: "#1e1f22",
-  },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: "#1e1f22",
-    borderBottomWidth: 1,
-    borderBottomColor: "#2b2d31",
-  },
-  headerTitle: {
-    color: "#ffffff",
-    fontSize: 18,
-    fontWeight: "bold",
-  },
-  closeButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "#2b2d31",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  closeButtonText: {
-    color: "#dbdee1",
-    fontSize: 16,
-    fontWeight: "bold",
-    marginTop: -2,
-  },
-});
