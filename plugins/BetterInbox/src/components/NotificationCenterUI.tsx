@@ -14,7 +14,7 @@ const { useState } = React;
 
 const { FormSection, FormRow, FormText, FormIcon } = Forms;
 
-// Safely resolve Discord's native SegmentedControl
+// Resolve Native SegmentedControl module
 const NativeSegmentedControl =
   findByDisplayName("SegmentedControl") ||
   findByName("SegmentedControl") ||
@@ -63,36 +63,52 @@ export default function NotificationCenterUI(): JSX.Element {
     }
   };
 
-  // Helper to render SegmentedControl safely or fall back to native-feeling chips
-  const renderPicker = (
-    values: string[],
-    selectedIndex: number,
-    onChange: (index: number) => void
-  ) => {
+  // Safe SegmentedControl wrapper with Discord-native object prop handling
+  const SafeSegmentedControl = ({
+    options,
+    selectedIndex,
+    onChange,
+  }: {
+    options: string[];
+    selectedIndex: number;
+    onChange: (index: number) => void;
+  }) => {
     if (NativeSegmentedControl) {
-      return (
-        <NativeSegmentedControl
-          values={values}
-          selectedIndex={selectedIndex}
-          onChange={(e: any) => {
-            const idx = typeof e === "number" ? e : e?.nativeEvent?.selectedSegmentIndex;
-            if (typeof idx === "number") onChange(idx);
-          }}
-        />
-      );
+      try {
+        return (
+          <NativeSegmentedControl
+            // Standard Discord RN SegmentedControl schema:
+            tabs={options.map((opt, i) => ({ id: `${i}`, label: opt }))}
+            activeTab={`${selectedIndex}`}
+            onTabSelect={(tab: any) => {
+              const idx = parseInt(tab?.id ?? tab, 10);
+              if (!isNaN(idx)) onChange(idx);
+            }}
+            // Legacy/Alternate prop support:
+            values={options}
+            selectedIndex={selectedIndex}
+            onChange={(e: any) => {
+              const idx = typeof e === "number" ? e : e?.nativeEvent?.selectedSegmentIndex;
+              if (typeof idx === "number") onChange(idx);
+            }}
+          />
+        );
+      } catch (err) {
+        console.warn("[BetterInbox] SegmentedControl render error, using fallback UI", err);
+      }
     }
 
-    // Zero-overhead fallback using simple native views if SegmentedControl isn't found
+    // High-performance Native Fallback Chips matching Discord's look & feel
     return (
       <View style={styles.chipRow}>
-        {values.map((val, idx) => (
+        {options.map((optionLabel, idx) => (
           <TouchableOpacity
-            key={val}
+            key={optionLabel}
             style={[styles.chip, selectedIndex === idx && styles.chipActive]}
             onPress={() => onChange(idx)}
           >
             <Text style={[styles.chipText, selectedIndex === idx && styles.chipTextActive]}>
-              {val}
+              {optionLabel}
             </Text>
           </TouchableOpacity>
         ))}
@@ -104,21 +120,21 @@ export default function NotificationCenterUI(): JSX.Element {
     <ScrollView style={styles.container}>
       {/* Category Selection */}
       <View style={styles.pickerContainer}>
-        {renderPicker(
-          tabs.map((t) => t.charAt(0).toUpperCase() + t.slice(1)),
-          activeTabIndex,
-          setActiveTabIndex
-        )}
+        <SafeSegmentedControl
+          options={tabs.map((t) => t.charAt(0).toUpperCase() + t.slice(1))}
+          selectedIndex={activeTabIndex}
+          onChange={setActiveTabIndex}
+        />
       </View>
 
       {/* Mentions Sub-Filter */}
       {activeTab === "mentions" && (
         <View style={styles.pickerContainer}>
-          {renderPicker(
-            subFilters.map((s) => s.toUpperCase()),
-            subFilterIndex,
-            setSubFilterIndex
-          )}
+          <SafeSegmentedControl
+            options={subFilters.map((s) => s.toUpperCase())}
+            selectedIndex={subFilterIndex}
+            onChange={setSubFilterIndex}
+          />
         </View>
       )}
 
