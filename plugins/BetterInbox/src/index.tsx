@@ -5,22 +5,19 @@ import type { LocalStorage, MentionSubCategory, NotificationItem } from "./types
 import NotificationCenterUI from "./components/NotificationCenterUI";
 import { patchYouBar } from "./youbar";
 
-// Retrieve Discord Stores & Notification Utilities
+// Retrieve Discord Stores
 const UserStore: any = findByStoreName("UserStore");
 const ChannelStore: any = findByStoreName("ChannelStore");
 const GuildStore: any = findByStoreName("GuildStore");
 const MessageStore: any = findByStoreName("MessageStore");
 const GuildMemberStore: any = findByStoreName("GuildMemberStore");
 
-// Discord native notification utilities (Module 9803)
-const NotificationEngine: any = findByProps("shouldNotifyBase", "makeTextChatNotification");
-
 const pluginStorage = (storage as LocalStorage) || { notifications: [] };
 const unpatches: (() => void)[] = [];
 
-// In-Memory storage cache with debounced disk write
 let memoryNotifications: NotificationItem[] = [];
 let saveTimeout: any = null;
+let retryHandle: ReturnType<typeof setInterval> | undefined;
 
 function syncStorageDebounced() {
   if (saveTimeout) clearTimeout(saveTimeout);
@@ -29,11 +26,31 @@ function syncStorageDebounced() {
   }, 3000);
 }
 
-// Helper to push items avoiding duplicate IDs
 function pushNotification(item: NotificationItem) {
   if (memoryNotifications.some((n) => n.id === item.id)) return;
   memoryNotifications = [item, ...memoryNotifications];
   syncStorageDebounced();
+}
+
+function stopRetrying() {
+  if (retryHandle) {
+    clearInterval(retryHandle);
+    retryHandle = undefined;
+  }
+}
+
+function attemptYouBarPatch() {
+  try {
+    const unpatch = patchYouBar();
+    if (unpatch) {
+      unpatches.push(unpatch);
+      stopRetrying();
+      console.log("[BetterInbox] Successfully patched YouBar");
+    }
+  } catch (e) {
+    console.error(`[BetterInbox] Failed to patch YouBar: ${e}`);
+    stopRetrying();
+  }
 }
 
 // -------------------------------------------------------------
@@ -44,13 +61,12 @@ function processMentionMessage(channelId: string, messageId: string, rawMsg?: an
     const currentUser = UserStore?.getCurrentUser();
     if (!currentUser) return;
 
-    // Use raw payload message if store cache miss occurs
     const msg = MessageStore?.getMessage(channelId, messageId) || rawMsg;
     const channel = ChannelStore?.getChannel(channelId);
     if (!msg || !channel) return;
 
     const author = msg.author || UserStore?.getUser(msg.author?.id);
-    if (!author || author.id === currentUser.id) return; // Ignore self
+    if (!author || author.id === currentUser.id) return;
 
     const guild = channel.guild_id ? GuildStore?.getGuild(channel.guild_id) : undefined;
     const guildName = guild?.name || (channel.isGroupDM ? (channel.isGroupDM() ? "Group DM" : "Direct Message") : "Direct Message");
@@ -108,15 +124,12 @@ function handleIncomingMessage(payload: any) {
 
     if (msg.author?.id === currentUser.id) return;
 
-    // Direct mention
     const isDirectMention = msg.mentions?.some((u: any) => u.id === currentUser.id);
 
-    // Reply check
     const isReplyToMe =
       msg.referenced_message?.author?.id === currentUser.id ||
       (msg.type === 19 && msg.referenced_message?.author?.id === currentUser.id);
 
-    // Role mention check
     let isRoleMention = false;
     const msgRoles = msg.mention_roles || msg.mentionRoles || [];
     if (msgRoles.length > 0 && msg.guild_id) {
@@ -134,7 +147,7 @@ function handleIncomingMessage(payload: any) {
 }
 
 // -------------------------------------------------------------
-// 3. REACTION HANDLER (WITH FALLBACK FOR UNCACHED MESSAGES)
+// 3. REACTION HANDLER
 // -------------------------------------------------------------
 function handleReactionAdd(payload: any): void {
   try {
@@ -148,8 +161,7 @@ function handleReactionAdd(payload: any): void {
     if (reactorId === currentUser.id) return;
 
     const targetMessage = MessageStore?.getMessage(channelId, targetMessageId);
-    
-    // If target message is cached, verify ownership
+
     if (targetMessage && targetMessage.author?.id !== currentUser.id) return;
 
     const channel = ChannelStore?.getChannel(channelId);
@@ -196,26 +208,29 @@ function handleReactionAdd(payload: any): void {
 // -------------------------------------------------------------
 export default {
   onLoad: () => {
-    console.log("[BetterInbox] Initializing notification listener...");
+    console.log("[BetterInbox] Initializing plugin...");
 
     if (!pluginStorage.notifications) {
       pluginStorage.notifications = [];
     }
     memoryNotifications = [...pluginStorage.notifications];
 
-    // Flux listeners for real-time capture
     FluxDispatcher.subscribe("MESSAGE_CREATE", handleIncomingMessage);
     FluxDispatcher.subscribe("MESSAGE_REACTION_ADD", handleReactionAdd);
 
-    try {
-      unpatches.push(patchYouBar());
-    } catch (err) {
-      console.error("[BetterInbox] YouBar patch error:", err);
-    }
+    // Attempt immediately, then fall back to interval retries (~9s max)
+    attemptYouBarPatch();
+    let ticks = 0;
+    retryHandle = setInterval(() => {
+      attemptYouBarPatch();
+      if (++ticks >= 30) stopRetrying();
+    }, 300);
   },
 
   onUnload: () => {
-    console.log("[BetterInbox] Unloaded");
+    console.log("[BetterInbox] Unloading plugin...");
+
+    stopRetrying();
 
     if (saveTimeout) clearTimeout(saveTimeout);
     pluginStorage.notifications = memoryNotifications.slice(0, 100);
