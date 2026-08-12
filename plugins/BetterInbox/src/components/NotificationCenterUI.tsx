@@ -56,7 +56,7 @@ const NotificationRow = memo(({ item, onPress }: { item: NotificationItem; onPre
     <TableRow
       label={item.title}
       subLabel={subLabelText}
-      trailingText={item.timestamp}
+      trailing={<Text style={styles.timestampText}>{item.timestamp}</Text>}
       icon={
         <Image
           source={{ uri: avatarUrl }}
@@ -231,4 +231,5 @@ const styles = StyleSheet.create({
   feed: { flex: 1, paddingHorizontal: 8, paddingVertical: 12 },
   emptyText: { color: "#949ba4", textAlign: "center", marginTop: 40, fontSize: 14 },
   avatarImage: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#4e5058" },
+  timestampText: { color: "#949ba4", fontSize: 11, alignSelf: "center" },
 });
