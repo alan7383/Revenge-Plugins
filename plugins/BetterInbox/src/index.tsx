@@ -1,35 +1,45 @@
 import { FluxDispatcher } from "@vendetta/metro/common";
 import { findByStoreName } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
-import type { LocalStorage, MentionSubCategory } from "./types";
+import type { LocalStorage, MentionSubCategory, NotificationItem } from "./types";
 import NotificationCenterUI from "./components/NotificationCenterUI";
 import { patchYouBar } from "./youbar";
 
-// Retrieve Discord Stores safely
+// Retrieve Discord Stores
 const UserStore: any = findByStoreName("UserStore");
 const ChannelStore: any = findByStoreName("ChannelStore");
 const GuildStore: any = findByStoreName("GuildStore");
 const MessageStore: any = findByStoreName("MessageStore");
-const GuildMemberStore: any = findByStoreName("GuildMemberStore");
 
 const pluginStorage = (storage as LocalStorage) || { notifications: [] };
-
-// Array to track active unpatch functions
 const unpatches: (() => void)[] = [];
 
-function processNotification(type: string, payload: any): void {
+// 1. IN-MEMORY CACHE (Avoids synchronous disk writes on every event)
+let memoryNotifications: NotificationItem[] = [];
+let saveTimeout: any = null;
+
+function syncStorageDebounced() {
+  if (saveTimeout) clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => {
+    pluginStorage.notifications = memoryNotifications.slice(0, 100); // Cap at 100
+  }, 5000); // Save to disk once every 5s max
+}
+
+// -------------------------------------------------------------
+// 1. TARGETED NOTIFICATION HANDLER (Mentions & Replies)
+// -------------------------------------------------------------
+function handleNotificationCreate(payload: any): void {
   try {
     const currentUser = UserStore?.getCurrentUser();
     if (!currentUser) return;
 
-    // Handle both wrapped payload.message and direct payload
-    const msg = payload.message || payload;
-    const author = msg?.author;
+    const msg = payload?.message;
+    const channelId = payload?.channel_id || msg?.channel_id;
+    if (!msg || !channelId) return;
 
-    // Ignore self actions
-    if (author?.id === currentUser.id || payload.user_id === currentUser.id) return;
+    const author = msg.author;
+    if (author?.id === currentUser.id) return; // Drop own actions
 
-    const channelId = msg?.channel_id || msg?.channelId || payload.channel_id;
     const channel = ChannelStore?.getChannel(channelId);
     const guild = channel?.guild_id ? GuildStore?.getGuild(channel.guild_id) : undefined;
 
@@ -37,178 +47,113 @@ function processNotification(type: string, payload: any): void {
     const channelName = channel?.name ? `#${channel.name}` : "DM";
     const timestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-    if (!Array.isArray(pluginStorage.notifications)) {
-      pluginStorage.notifications = [];
+    // Determine category
+    const isReply =
+      msg.type === 19 ||
+      msg.referenced_message?.author?.id === currentUser.id;
+
+    let category: "mentions" | "replies" = isReply ? "replies" : "mentions";
+    let subCategory: MentionSubCategory = "people";
+
+    if (author?.bot) {
+      subCategory = "bot";
+    } else if (msg.mention_roles?.length > 0 || msg.mentionRoles?.length > 0) {
+      subCategory = "role";
     }
 
-    // -------------------------------------------------------------
-    // 1. MESSAGE CREATION (Mentions, Role Mentions & Replies)
-    // -------------------------------------------------------------
-    if (type === "MESSAGE_CREATE") {
-      if (!msg) return;
+    const newNotification: NotificationItem = {
+      id: msg.id || `${Date.now()}`,
+      category,
+      subCategory,
+      title: isReply
+        ? `${author?.globalName || author?.username || "Someone"} replied to you`
+        : subCategory === "role"
+        ? `${author?.globalName || author?.username || "Someone"} mentioned a role you have`
+        : `${author?.globalName || author?.username || "Someone"} mentioned you`,
+      content: msg.content || "",
+      guildName,
+      channelName,
+      guildId: guild?.id,
+      channelId,
+      messageId: msg.id,
+      timestamp,
+      author,
+    };
 
-      // REPLIES (Message type 19 or referenced_message)
-      const isReply =
-        msg.type === 19 &&
-        (msg.referenced_message?.author?.id === currentUser.id ||
-         msg.messageReference?.message_id);
-
-      if (isReply) {
-        console.log("[BetterInbox] Caught Reply from", author?.globalName || author?.username);
-        pluginStorage.notifications = [
-          {
-            id: msg.id || `${Date.now()}`,
-            category: "replies",
-            title: `${author?.globalName || author?.username || "Someone"} replied to you`,
-            content: msg.content || "",
-            guildName,
-            channelName,
-            guildId: guild?.id,
-            channelId,
-            messageId: msg.id,
-            timestamp,
-            author,
-          },
-          ...pluginStorage.notifications,
-        ];
-        return;
-      }
-
-      // DIRECT USER MENTIONS
-      const mentionsArray = Array.isArray(msg.mentions) ? msg.mentions : [];
-
-      const isExplicitlyMentioned =
-        msg.mentioned === true ||
-        payload.mentioned === true ||
-        mentionsArray.some((m: any) =>
-          typeof m === "string" ? m === currentUser.id : m?.id === currentUser.id
-        );
-
-      const isContentMentioned =
-        typeof msg.content === "string" &&
-        (msg.content.includes(`<@${currentUser.id}>`) ||
-         msg.content.includes(`<@!${currentUser.id}>`));
-
-      const isEveryoneMention = msg.mentionEveryone || msg.mention_everyone;
-
-      // ROLE MENTIONS
-      const roleMentions = msg.mention_roles || msg.mentionRoles || payload.mention_roles || [];
-      const hasRoleMentions = Array.isArray(roleMentions) && roleMentions.length > 0;
-
-      let isUserRoleMentioned = false;
-      if (hasRoleMentions && guild?.id) {
-        const member = GuildMemberStore?.getMember(guild.id, currentUser.id);
-        const userRoles: string[] = member?.roles || [];
-        isUserRoleMentioned = roleMentions.some((roleId: string) => userRoles.includes(roleId));
-      }
-
-      // HANDLE MENTIONS LOGIC
-      if (isExplicitlyMentioned || isContentMentioned || isEveryoneMention || isUserRoleMentioned) {
-        console.log("[BetterInbox] Caught Mention from", author?.globalName || author?.username);
-
-        let subCategory: MentionSubCategory = "people";
-        if (isUserRoleMentioned) {
-          subCategory = "role";
-        } else if (author?.bot) {
-          subCategory = "bot";
-        }
-
-        pluginStorage.notifications = [
-          {
-            id: msg.id || `${Date.now()}`,
-            category: "mentions",
-            subCategory,
-            title: isUserRoleMentioned
-              ? `${author?.globalName || author?.username || "Someone"} mentioned a role you have`
-              : `${author?.globalName || author?.username || "Someone"} mentioned you`,
-            content: msg.content || "",
-            guildName,
-            channelName,
-            guildId: guild?.id,
-            channelId,
-            messageId: msg.id,
-            timestamp,
-            author,
-          },
-          ...pluginStorage.notifications,
-        ];
-        return;
-      }
-    }
-
-    // -------------------------------------------------------------
-    // 2. REACTION ADD
-    // -------------------------------------------------------------
-    if (type === "MESSAGE_REACTION_ADD") {
-      const targetMessageId = payload.message_id || payload.messageId;
-      const reactorId = payload.user_id || payload.userId;
-
-      // Ignore if YOU reacted
-      if (reactorId === currentUser.id) return;
-
-      const targetMessage = MessageStore?.getMessage(channelId, targetMessageId);
-
-      // STRICT FILTER: If message exists in cache and isn't yours, drop it!
-      if (targetMessage && targetMessage.author?.id !== currentUser.id) {
-        return;
-      }
-
-      const reactorUser =
-        payload.member?.user ||
-        payload.user ||
-        UserStore?.getUser(reactorId);
-
-      const finalAuthor = reactorUser || {
-        id: reactorId,
-        username: payload.member?.nick || "Someone",
-        globalName: payload.member?.nick || "Someone",
-        avatar: null,
-      };
-
-      const reactorName =
-        finalAuthor.globalName ||
-        finalAuthor.username ||
-        "Someone";
-
-      const emoji = payload.emoji;
-      const emojiName = emoji?.name || "an emoji";
-
-      console.log("[BetterInbox] Caught Reaction on your message from", reactorName);
-
-      pluginStorage.notifications = [
-        {
-          id: `${targetMessageId}-${reactorId}-${Date.now()}`,
-          category: "reactions",
-          title: `${reactorName} reacted ${emojiName}`,
-          content: targetMessage?.content ? `"${targetMessage.content}"` : `Reacted to your message in ${channelName}`,
-          guildName,
-          channelName,
-          guildId: guild?.id,
-          channelId,
-          messageId: targetMessageId,
-          timestamp,
-          author: finalAuthor,
-        },
-        ...pluginStorage.notifications,
-      ];
-    }
+    memoryNotifications = [newNotification, ...memoryNotifications];
+    syncStorageDebounced();
   } catch (err) {
-    console.error("[BetterInbox] Listener error:", err);
+    console.error("[BetterInbox] Notification error:", err);
   }
 }
 
-const handleMessageCreate = (payload: any) => processNotification("MESSAGE_CREATE", payload);
-const handleReactionAdd = (payload: any) => processNotification("MESSAGE_REACTION_ADD", payload);
+// -------------------------------------------------------------
+// 2. REACTION HANDLER (Filtered to authors(like your messages)
+// -------------------------------------------------------------
+function handleReactionAdd(payload: any): void {
+  try {
+    const currentUser = UserStore?.getCurrentUser();
+    if (!currentUser) return;
+
+    const channelId = payload.channel_id || payload.channelId;
+    const targetMessageId = payload.message_id || payload.messageId;
+    const reactorId = payload.user_id || payload.userId;
+
+    if (reactorId === currentUser.id) return;
+
+    // Fast check: Drop if target message isn't yours
+    const targetMessage = MessageStore?.getMessage(channelId, targetMessageId);
+    if (!targetMessage || targetMessage.author?.id !== currentUser.id) return;
+
+    const channel = ChannelStore?.getChannel(channelId);
+    const guild = channel?.guild_id ? GuildStore?.getGuild(channel.guild_id) : undefined;
+    const guildName = guild?.name || (channel?.isGroupDM() ? "Group DM" : "Direct Message");
+    const channelName = channel?.name ? `#${channel.name}` : "DM";
+    const timestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+    const reactorUser = payload.member?.user || payload.user || UserStore?.getUser(reactorId);
+    const finalAuthor = reactorUser || {
+      id: reactorId,
+      username: payload.member?.nick || "Someone",
+      globalName: payload.member?.nick || "Someone",
+      avatar: null,
+    };
+
+    const reactorName = finalAuthor.globalName || finalAuthor.username || "Someone";
+    const emojiName = payload.emoji?.name || "an emoji";
+
+    const newNotification: NotificationItem = {
+      id: `${targetMessageId}-${reactorId}-${Date.now()}`,
+      category: "reactions",
+      title: `${reactorName} reacted ${emojiName}`,
+      content: targetMessage?.content ? `"${targetMessage.content}"` : `Reacted to your message in ${channelName}`,
+      guildName,
+      channelName,
+      guildId: guild?.id,
+      channelId,
+      messageId: targetMessageId,
+      timestamp,
+      author: finalAuthor,
+    };
+
+    memoryNotifications = [newNotification, ...memoryNotifications];
+    syncStorageDebounced();
+  } catch (err) {
+    console.error("[BetterInbox] Reaction error:", err);
+  }
+}
 
 export default {
   onLoad: () => {
-    console.log("[BetterInbox] Loaded successfully");
+    console.log("[BetterInbox] Plugin loaded without MESSAGE_CREATE listener");
 
     if (!pluginStorage.notifications) {
       pluginStorage.notifications = [];
     }
+    memoryNotifications = [...pluginStorage.notifications];
 
-    FluxDispatcher.subscribe("MESSAGE_CREATE", handleMessageCreate);
+    // Listen ONLY to Discord's pre-filtered events
+    FluxDispatcher.subscribe("NOTIFICATION_CREATE", handleNotificationCreate);
     FluxDispatcher.subscribe("MESSAGE_REACTION_ADD", handleReactionAdd);
 
     try {
@@ -221,7 +166,11 @@ export default {
   onUnload: () => {
     console.log("[BetterInbox] Unloaded");
 
-    FluxDispatcher.unsubscribe("MESSAGE_CREATE", handleMessageCreate);
+    // Flush remaining notifications immediately
+    if (saveTimeout) clearTimeout(saveTimeout);
+    pluginStorage.notifications = memoryNotifications.slice(0, 100);
+
+    FluxDispatcher.unsubscribe("NOTIFICATION_CREATE", handleNotificationCreate);
     FluxDispatcher.unsubscribe("MESSAGE_REACTION_ADD", handleReactionAdd);
 
     for (const unpatch of unpatches) {
@@ -232,4 +181,3 @@ export default {
 
   settings: NotificationCenterUI,
 };
-
