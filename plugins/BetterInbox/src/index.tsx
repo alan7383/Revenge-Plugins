@@ -1,6 +1,7 @@
 import { FluxDispatcher } from "@vendetta/metro/common";
 import { findByStoreName } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
+import { patcher } from "@vendetta/patcher";
 import type { LocalStorage, MentionSubCategory, NotificationItem } from "./types";
 import NotificationCenterUI from "./components/NotificationCenterUI";
 import { patchYouBar } from "./youbar";
@@ -10,44 +11,42 @@ const UserStore: any = findByStoreName("UserStore");
 const ChannelStore: any = findByStoreName("ChannelStore");
 const GuildStore: any = findByStoreName("GuildStore");
 const MessageStore: any = findByStoreName("MessageStore");
+const UnreadStore: any = findByStoreName("UnreadStore");
 
 const pluginStorage = (storage as LocalStorage) || { notifications: [] };
 const unpatches: (() => void)[] = [];
 
-// 1. IN-MEMORY CACHE (Avoids synchronous disk writes on every event)
+// In-Memory storage cache with debounced disk write
 let memoryNotifications: NotificationItem[] = [];
 let saveTimeout: any = null;
 
 function syncStorageDebounced() {
   if (saveTimeout) clearTimeout(saveTimeout);
   saveTimeout = setTimeout(() => {
-    pluginStorage.notifications = memoryNotifications.slice(0, 100); // Cap at 100
-  }, 5000); // Save to disk once every 5s max
+    pluginStorage.notifications = memoryNotifications.slice(0, 100);
+  }, 5000);
 }
 
 // -------------------------------------------------------------
-// 1. TARGETED NOTIFICATION HANDLER (Mentions & Replies)
+// 1. PROCESS TARGETED MENTIONS / REPLIES
 // -------------------------------------------------------------
-function handleNotificationCreate(payload: any): void {
+function processMentionMessage(channelId: string, messageId: string) {
   try {
     const currentUser = UserStore?.getCurrentUser();
     if (!currentUser) return;
 
-    const msg = payload?.message;
-    const channelId = payload?.channel_id || msg?.channel_id;
-    if (!msg || !channelId) return;
-
-    const author = msg.author;
-    if (author?.id === currentUser.id) return; // Drop own actions
-
+    const msg = MessageStore?.getMessage(channelId, messageId);
     const channel = ChannelStore?.getChannel(channelId);
-    const guild = channel?.guild_id ? GuildStore?.getGuild(channel.guild_id) : undefined;
+    if (!msg || !channel) return;
 
-    const guildName = guild?.name || (channel?.isGroupDM() ? "Group DM" : "Direct Message");
-    const channelName = channel?.name ? `#${channel.name}` : "DM";
+    const author = msg.author || UserStore?.getUser(msg.author?.id);
+    if (!author || author.id === currentUser.id) return; // Drop own actions
+
+    const guild = channel.guild_id ? GuildStore?.getGuild(channel.guild_id) : undefined;
+    const guildName = guild?.name || (channel.isGroupDM() ? "Group DM" : "Direct Message");
+    const channelName = channel.name ? `#${channel.name}` : "DM";
     const timestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-    // Determine category
     const isReply =
       msg.type === 19 ||
       msg.referenced_message?.author?.id === currentUser.id;
@@ -55,7 +54,7 @@ function handleNotificationCreate(payload: any): void {
     let category: "mentions" | "replies" = isReply ? "replies" : "mentions";
     let subCategory: MentionSubCategory = "people";
 
-    if (author?.bot) {
+    if (author.bot) {
       subCategory = "bot";
     } else if (msg.mention_roles?.length > 0 || msg.mentionRoles?.length > 0) {
       subCategory = "role";
@@ -66,10 +65,10 @@ function handleNotificationCreate(payload: any): void {
       category,
       subCategory,
       title: isReply
-        ? `${author?.globalName || author?.username || "Someone"} replied to you`
+        ? `${author.globalName || author.username || "Someone"} replied to you`
         : subCategory === "role"
-        ? `${author?.globalName || author?.username || "Someone"} mentioned a role you have`
-        : `${author?.globalName || author?.username || "Someone"} mentioned you`,
+        ? `${author.globalName || author.username || "Someone"} mentioned a role you have`
+        : `${author.globalName || author.username || "Someone"} mentioned you`,
       content: msg.content || "",
       guildName,
       channelName,
@@ -83,12 +82,12 @@ function handleNotificationCreate(payload: any): void {
     memoryNotifications = [newNotification, ...memoryNotifications];
     syncStorageDebounced();
   } catch (err) {
-    console.error("[BetterInbox] Notification error:", err);
+    console.error("[BetterInbox] Mention process error:", err);
   }
 }
 
 // -------------------------------------------------------------
-// 2. REACTION HANDLER (Filtered to authors(like your messages)
+// 2. REACTION HANDLER (Filtered to your messages)
 // -------------------------------------------------------------
 function handleReactionAdd(payload: any): void {
   try {
@@ -101,7 +100,6 @@ function handleReactionAdd(payload: any): void {
 
     if (reactorId === currentUser.id) return;
 
-    // Fast check: Drop if target message isn't yours
     const targetMessage = MessageStore?.getMessage(channelId, targetMessageId);
     if (!targetMessage || targetMessage.author?.id !== currentUser.id) return;
 
@@ -145,32 +143,50 @@ function handleReactionAdd(payload: any): void {
 
 export default {
   onLoad: () => {
-    console.log("[BetterInbox] Plugin loaded without MESSAGE_CREATE listener");
+    console.log("[BetterInbox] Loaded with UnreadStore patch");
 
     if (!pluginStorage.notifications) {
       pluginStorage.notifications = [];
     }
     memoryNotifications = [...pluginStorage.notifications];
 
-    // Listen ONLY to Discord's pre-filtered events
-    FluxDispatcher.subscribe("NOTIFICATION_CREATE", handleNotificationCreate);
+    // 1. Patch UnreadStore.addMention (Triggers ONLY when a mention/reply is added)
+    if (UnreadStore?.addMention) {
+      unpatches.push(
+        patcher.after(UnreadStore, "addMention", (args) => {
+          const [channelId, messageId] = args || [];
+          if (channelId && messageId) {
+            processMentionMessage(channelId, messageId);
+          }
+        })
+      );
+    } else {
+      // Fallback to NOTIFICATION_CREATE if UnreadStore is unpatched
+      FluxDispatcher.subscribe("NOTIFICATION_CREATE", (payload: any) => {
+        const channelId = payload?.channel_id || payload?.message?.channel_id;
+        const messageId = payload?.message?.id;
+        if (channelId && messageId) {
+          processMentionMessage(channelId, messageId);
+        }
+      });
+    }
+
+    // 2. Listen to Reaction events
     FluxDispatcher.subscribe("MESSAGE_REACTION_ADD", handleReactionAdd);
 
     try {
       unpatches.push(patchYouBar());
     } catch (err) {
-      console.error("[BetterInbox] Failed to patch YouBar:", err);
+      console.error("[BetterInbox] YouBar patch error:", err);
     }
   },
 
   onUnload: () => {
     console.log("[BetterInbox] Unloaded");
 
-    // Flush remaining notifications immediately
     if (saveTimeout) clearTimeout(saveTimeout);
     pluginStorage.notifications = memoryNotifications.slice(0, 100);
 
-    FluxDispatcher.unsubscribe("NOTIFICATION_CREATE", handleNotificationCreate);
     FluxDispatcher.unsubscribe("MESSAGE_REACTION_ADD", handleReactionAdd);
 
     for (const unpatch of unpatches) {
