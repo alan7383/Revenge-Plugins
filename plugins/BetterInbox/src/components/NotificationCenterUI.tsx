@@ -1,7 +1,7 @@
+import { findByName, findByProps, findByDisplayName } from "@vendetta/metro";
 import { React, ReactNative, NavigationNative } from "@vendetta/metro/common";
-import { findByProps } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
-import { Forms, SegmentedControl } from "@vendetta/ui/components";
+import { Forms } from "@vendetta/ui/components";
 import {
   NotificationCategory,
   MentionSubCategory,
@@ -9,10 +9,17 @@ import {
   LocalStorage,
 } from "../types";
 
-const { ScrollView, View, StyleSheet } = ReactNative;
+const { ScrollView, View, Text, TouchableOpacity, StyleSheet } = ReactNative;
 const { useState } = React;
 
 const { FormSection, FormRow, FormText, FormIcon } = Forms;
+
+// Safely resolve Discord's native SegmentedControl
+const NativeSegmentedControl =
+  findByDisplayName("SegmentedControl") ||
+  findByName("SegmentedControl") ||
+  findByProps("SegmentedControl")?.SegmentedControl;
+
 const Navigation = findByProps("push", "pop");
 const Router = findByProps("transitionToGuild", "transitionTo");
 
@@ -56,29 +63,66 @@ export default function NotificationCenterUI(): JSX.Element {
     }
   };
 
+  // Helper to render SegmentedControl safely or fall back to native-feeling chips
+  const renderPicker = (
+    values: string[],
+    selectedIndex: number,
+    onChange: (index: number) => void
+  ) => {
+    if (NativeSegmentedControl) {
+      return (
+        <NativeSegmentedControl
+          values={values}
+          selectedIndex={selectedIndex}
+          onChange={(e: any) => {
+            const idx = typeof e === "number" ? e : e?.nativeEvent?.selectedSegmentIndex;
+            if (typeof idx === "number") onChange(idx);
+          }}
+        />
+      );
+    }
+
+    // Zero-overhead fallback using simple native views if SegmentedControl isn't found
+    return (
+      <View style={styles.chipRow}>
+        {values.map((val, idx) => (
+          <TouchableOpacity
+            key={val}
+            style={[styles.chip, selectedIndex === idx && styles.chipActive]}
+            onPress={() => onChange(idx)}
+          >
+            <Text style={[styles.chipText, selectedIndex === idx && styles.chipTextActive]}>
+              {val}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    );
+  };
+
   return (
     <ScrollView style={styles.container}>
-      {/* Native Discord Segmented Control for Main Categories */}
+      {/* Category Selection */}
       <View style={styles.pickerContainer}>
-        <SegmentedControl
-          values={tabs.map((t) => t.charAt(0).toUpperCase() + t.slice(1))}
-          selectedIndex={activeTabIndex}
-          onChange={(idx: number) => setActiveTabIndex(idx)}
-        />
+        {renderPicker(
+          tabs.map((t) => t.charAt(0).toUpperCase() + t.slice(1)),
+          activeTabIndex,
+          setActiveTabIndex
+        )}
       </View>
 
-      {/* Native Mentions Sub-Filter */}
+      {/* Mentions Sub-Filter */}
       {activeTab === "mentions" && (
         <View style={styles.pickerContainer}>
-          <SegmentedControl
-            values={subFilters.map((s) => s.toUpperCase())}
-            selectedIndex={subFilterIndex}
-            onChange={(idx: number) => setSubFilterIndex(idx)}
-          />
+          {renderPicker(
+            subFilters.map((s) => s.toUpperCase()),
+            subFilterIndex,
+            setSubFilterIndex
+          )}
         </View>
       )}
 
-      {/* Native Form Section & Rows for Zero-Lag Feed */}
+      {/* Native Form Section Feed */}
       <FormSection title={`NOTIFICATIONS (${filteredNotifications.length})`}>
         {filteredNotifications.length === 0 ? (
           <FormRow
@@ -128,5 +172,28 @@ const styles = StyleSheet.create({
   timestamp: {
     fontSize: 12,
     color: "#949ba4",
+  },
+  chipRow: {
+    flexDirection: "row",
+    backgroundColor: "#2b2d31",
+    borderRadius: 8,
+    padding: 3,
+  },
+  chip: {
+    flex: 1,
+    paddingVertical: 8,
+    alignItems: "center",
+    borderRadius: 6,
+  },
+  chipActive: {
+    backgroundColor: "#1e1f22",
+  },
+  chipText: {
+    color: "#949ba4",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  chipTextActive: {
+    color: "#ffffff",
   },
 });
