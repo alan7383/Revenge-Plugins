@@ -8,7 +8,7 @@ import {
   LocalStorage,
 } from "../types";
 
-const { View, Text, TouchableOpacity, ScrollView, StyleSheet } = ReactNative;
+const { View, Text, TouchableOpacity, ScrollView, Image, StyleSheet } = ReactNative;
 const { useState, useMemo, useCallback, memo } = React;
 
 const Router = findByProps("transitionToGuild", "transitionTo");
@@ -20,18 +20,36 @@ const useTabsState = nativeTabsModule?.useTabsState;
 
 const NativeSegmentedControl = findByDisplayName("SegmentedControl");
 
-// Discord Native TableRow Components
+// Native Discord TableRow Components
 const TableRow = findByName("TableRow") || findByProps("TableRow")?.TableRow;
 const TableRowGroup = findByProps("TableRowGroup")?.TableRowGroup || View;
-const TableRowIcon = findByName("TableRowIcon") || findByProps("TableRowIcon")?.TableRowIcon;
 
-// 1. MEMOIZED TABLE ROW COMPONENT
-// Renders native Discord setting-style rows for ultimate performance
+// Helper to reliably compute Discord avatar URLs
+function getAvatarUrl(author: any): string {
+  if (!author) return "https://cdn.discordapp.com/embed/avatars/0.png";
+
+  const { id, avatar, discriminator } = author;
+
+  if (avatar) {
+    const isAnimated = typeof avatar === "string" && avatar.startsWith("a_");
+    const ext = isAnimated ? "gif" : "png";
+    return `https://cdn.discordapp.com/avatars/${id}/${avatar}.${ext}?size=128`;
+  }
+
+  // Handle Default Discord Avatars (legacy vs pomelo usernames)
+  try {
+    const defaultIndex = discriminator && discriminator !== "0"
+      ? parseInt(discriminator, 10) % 5
+      : Number((BigInt(id || "0") >> 22n) % 6n);
+    return `https://cdn.discordapp.com/embed/avatars/${defaultIndex}.png`;
+  } catch {
+    return "https://cdn.discordapp.com/embed/avatars/0.png";
+  }
+}
+
+// 1. MEMOIZED ROW COMPONENT
 const NotificationRow = memo(({ item, onPress }: { item: NotificationItem; onPress: () => void }) => {
-  const avatarUrl = item.author?.avatar
-    ? `https://cdn.discordapp.com/avatars/${item.author.id}/${item.author.avatar}.png`
-    : "https://cdn.discordapp.com/embed/avatars/0.png";
-
+  const avatarUrl = getAvatarUrl(item.author);
   const subLabelText = `${item.guildName} • ${item.channelName}\n${item.content || ""}`.trim();
 
   return (
@@ -40,9 +58,10 @@ const NotificationRow = memo(({ item, onPress }: { item: NotificationItem; onPre
       subLabel={subLabelText}
       trailingText={item.timestamp}
       icon={
-        TableRowIcon ? (
-          <TableRowIcon source={{ uri: avatarUrl }} style={styles.avatarIcon} />
-        ) : undefined
+        <Image
+          source={{ uri: avatarUrl }}
+          style={styles.avatarImage}
+        />
       }
       onPress={onPress}
     />
@@ -80,7 +99,6 @@ export default function NotificationCenterUI(): JSX.Element {
   const pluginStorage = (storage as LocalStorage) || { notifications: [] };
   const notifications: NotificationItem[] = pluginStorage.notifications || [];
 
-  // Filter and limit items to top 30 for smooth rendering
   const displayedNotifications = useMemo(() => {
     const filtered = notifications.filter((n) => {
       if (currentCategory === "mentions") {
@@ -178,7 +196,7 @@ export default function NotificationCenterUI(): JSX.Element {
         </View>
       )}
 
-      {/* Feed using Native TableRowGroup */}
+      {/* Feed with TableRowGroup */}
       <ScrollView style={styles.feed} removeClippedSubviews={true}>
         {displayedNotifications.length === 0 ? (
           <Text style={styles.emptyText}>No notifications found for this category.</Text>
@@ -212,5 +230,5 @@ const styles = StyleSheet.create({
   subFilterText: { color: "#dbdee1", fontSize: 11, fontWeight: "bold" },
   feed: { flex: 1, paddingHorizontal: 8, paddingVertical: 12 },
   emptyText: { color: "#949ba4", textAlign: "center", marginTop: 40, fontSize: 14 },
-  avatarIcon: { width: 36, height: 36, borderRadius: 18 },
+  avatarImage: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#4e5058" },
 });
