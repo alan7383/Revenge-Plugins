@@ -11,12 +11,15 @@ const modalCloseButton =
   findByProps("getRenderCloseButton")?.getRenderCloseButton ??
   findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
 
-export function patchYouBar() {
+/** 
+ * Returns unpatch function on success, or null if YouBarNotificationsButton 
+ * isn't registered in Metro yet.
+ */
+export function patchYouBar(): (() => void) | null {
   const YouBarNotificationsButton = findByTypeName("YouBarNotificationsButton");
 
   if (!YouBarNotificationsButton) {
-    console.warn("[BetterInbox] YouBarNotificationsButton component not found");
-    return () => {};
+    return null;
   }
 
   const BellIcon = getAssetIDByName("BellIcon") || getAssetIDByName("NotificationBellIcon");
@@ -32,7 +35,6 @@ export function patchYouBar() {
     const openInboxNavigator = () => {
       console.log("[BetterInbox] Launching native Navigator modal...");
 
-      // Native Discord Modal Stack Navigator with Header & Native X Button
       const InboxModal = () => (
         <Navigator
           initialRouteName="BetterInboxPage"
