@@ -9,18 +9,16 @@ import {
 } from "../types";
 
 const { View, Text, TouchableOpacity, ScrollView, Image, StyleSheet } = ReactNative;
-const { useState } = React;
+const { useState, useMemo, useCallback } = React;
 
 const Router = findByProps("transitionToGuild", "transitionTo");
 
-// Discord Native Component Lookups with Fallbacks
+// Discord Native Component Lookups
 const NativeTabs = findByDisplayName("Tabs");
 const nativeTabsModule = findByProps("useTabsState");
 const useTabsState = nativeTabsModule?.useTabsState;
 
 const NativeSegmentedControl = findByDisplayName("SegmentedControl");
-const nativeSegmentedModule = findByProps("useSegmentedControlState");
-const useSegmentedControlState = nativeSegmentedModule?.useSegmentedControlState;
 
 export default function NotificationCenterUI(): JSX.Element {
   if (typeof useProxy === "function" && storage) {
@@ -31,14 +29,17 @@ export default function NotificationCenterUI(): JSX.Element {
     }
   }
 
-  // Fallback states if native hooks are unavailable in current client build
-  const [activeTab, setActiveTab] = useState<NotificationCategory>("mentions");
-  const [mentionFilterIndex, setMentionFilterIndex] = useState<number>(0);
+  // Pure React State for crisp, instant UI updates
+  const [activeTabIdx, setActiveTabIdx] = useState<number>(0);
+  const [mentionFilterIdx, setMentionFilterIdx] = useState<number>(0);
 
   const categories: NotificationCategory[] = ["mentions", "replies", "reactions", "other"];
   const subFilters: Array<"all" | MentionSubCategory> = ["all", "people", "role", "bot"];
 
-  // Initialize Discord Native Tabs State if available
+  const currentCategory = categories[activeTabIdx] ?? "mentions";
+  const currentMentionFilter = subFilters[mentionFilterIdx] ?? "all";
+
+  // 1. Native Tabs state hook initialized with explicit state sync
   const tabsState = useTabsState
     ? useTabsState({
         items: categories.map((cat) => ({
@@ -49,41 +50,29 @@ export default function NotificationCenterUI(): JSX.Element {
       })
     : null;
 
-  // Initialize Discord Native SegmentedControl State if available
-  const segmentedState = useSegmentedControlState
-    ? useSegmentedControlState({
-        items: subFilters.map((sub) => ({
-          id: sub,
-          label: sub.toUpperCase(),
-        })),
-        initialIndex: 0,
-      })
-    : null;
-
-  // Sync active categories & filters depending on native hook usage
-  const currentCategory: NotificationCategory = tabsState
-    ? categories[tabsState.activeIndex] ?? "mentions"
-    : activeTab;
-
-  const currentMentionFilter: "all" | MentionSubCategory = segmentedState
-    ? subFilters[segmentedState.selectedIndex] ?? "all"
-    : subFilters[mentionFilterIndex] ?? "all";
+  // Sync Tabs state if used
+  const handleTabChange = (index: number) => {
+    setActiveTabIdx(index);
+  };
 
   const pluginStorage = (storage as LocalStorage) || { notifications: [] };
   const notifications: NotificationItem[] = pluginStorage.notifications || [];
 
-  const filteredNotifications = notifications.filter((n) => {
-    if (currentCategory === "mentions") {
-      if (n.category !== "mentions") return false;
-      if (currentMentionFilter === "people") return n.subCategory === "people";
-      if (currentMentionFilter === "role") return n.subCategory === "role";
-      if (currentMentionFilter === "bot") return n.subCategory === "bot";
-      return true;
-    }
-    return n.category === currentCategory;
-  });
+  // 2. Memoize list filtering to eliminate lag
+  const filteredNotifications = useMemo(() => {
+    return notifications.filter((n) => {
+      if (currentCategory === "mentions") {
+        if (n.category !== "mentions") return false;
+        if (currentMentionFilter === "people") return n.subCategory === "people";
+        if (currentMentionFilter === "role") return n.subCategory === "role";
+        if (currentMentionFilter === "bot") return n.subCategory === "bot";
+        return true;
+      }
+      return n.category === currentCategory;
+    });
+  }, [notifications, currentCategory, currentMentionFilter]);
 
-  const jumpToMessage = (guildId?: string, channelId?: string, messageId?: string): void => {
+  const jumpToMessage = useCallback((guildId?: string, channelId?: string, messageId?: string): void => {
     if (!channelId || !messageId) return;
 
     try {
@@ -95,22 +84,31 @@ export default function NotificationCenterUI(): JSX.Element {
     } catch (err) {
       console.error("[BetterInbox] Navigation error:", err);
     }
-  };
+  }, []);
 
   return (
     <View style={styles.container}>
-      {/* Category Tabs (Native or Custom Fallback) */}
+      {/* Category Tabs */}
       {NativeTabs && tabsState ? (
-        <NativeTabs state={tabsState} />
+        <NativeTabs
+          state={{
+            ...tabsState,
+            activeIndex: activeTabIdx,
+            setActiveIndex: (idx: number) => {
+              tabsState.setActiveIndex?.(idx);
+              handleTabChange(idx);
+            },
+          }}
+        />
       ) : (
         <View style={styles.tabBar}>
-          {categories.map((tab) => (
+          {categories.map((tab, idx) => (
             <TouchableOpacity
               key={tab}
-              style={[styles.tabButton, currentCategory === tab && styles.activeTabButton]}
-              onPress={() => setActiveTab(tab)}
+              style={[styles.tabButton, activeTabIdx === idx && styles.activeTabButton]}
+              onPress={() => setActiveTabIdx(idx)}
             >
-              <Text style={[styles.tabText, currentCategory === tab && styles.activeTabText]}>
+              <Text style={[styles.tabText, activeTabIdx === idx && styles.activeTabText]}>
                 {tab.charAt(0).toUpperCase() + tab.slice(1)}
               </Text>
             </TouchableOpacity>
@@ -118,11 +116,25 @@ export default function NotificationCenterUI(): JSX.Element {
         </View>
       )}
 
-      {/* Mention Sub-Filter (Native SegmentedControl or Custom Fallback) */}
+      {/* Mention Sub-Filter Control */}
       {currentCategory === "mentions" && (
         <View style={styles.subFilterWrapper}>
-          {NativeSegmentedControl && segmentedState ? (
-            <NativeSegmentedControl state={segmentedState} />
+          {NativeSegmentedControl ? (
+            <NativeSegmentedControl
+              value={currentMentionFilter}
+              options={subFilters.map((sub) => ({
+                value: sub,
+                label: sub.toUpperCase(),
+              }))}
+              onChange={(val: string) => {
+                const targetIdx = subFilters.indexOf(val as any);
+                if (targetIdx !== -1) setMentionFilterIdx(targetIdx);
+              }}
+              onValueChange={(val: string) => {
+                const targetIdx = subFilters.indexOf(val as any);
+                if (targetIdx !== -1) setMentionFilterIdx(targetIdx);
+              }}
+            />
           ) : (
             <View style={styles.subFilterBar}>
               {subFilters.map((sub, idx) => (
@@ -130,9 +142,9 @@ export default function NotificationCenterUI(): JSX.Element {
                   key={sub}
                   style={[
                     styles.subFilterButton,
-                    currentMentionFilter === sub && styles.activeSubFilter,
+                    mentionFilterIdx === idx && styles.activeSubFilter,
                   ]}
-                  onPress={() => setMentionFilterIndex(idx)}
+                  onPress={() => setMentionFilterIdx(idx)}
                 >
                   <Text style={styles.subFilterText}>{sub.toUpperCase()}</Text>
                 </TouchableOpacity>
@@ -143,13 +155,13 @@ export default function NotificationCenterUI(): JSX.Element {
       )}
 
       {/* Feed List */}
-      <ScrollView style={styles.feed}>
+      <ScrollView style={styles.feed} removeClippedSubviews={true}>
         {filteredNotifications.length === 0 ? (
           <Text style={styles.emptyText}>No notifications found for this category.</Text>
         ) : (
           filteredNotifications.map((item) => (
             <TouchableOpacity
-              key={item.id}
+              key={item.id || `${item.channelId}-${item.messageId}`}
               style={styles.card}
               onPress={() => jumpToMessage(item.guildId, item.channelId, item.messageId)}
             >
@@ -185,16 +197,8 @@ export default function NotificationCenterUI(): JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#313338",
-  },
-  subFilterWrapper: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: "#1e1f22",
-  },
-  // Custom Fallback Styles
+  container: { flex: 1, backgroundColor: "#313338" },
+  subFilterWrapper: { paddingHorizontal: 12, paddingVertical: 8, backgroundColor: "#1e1f22" },
   tabBar: { flexDirection: "row", backgroundColor: "#2b2d31", paddingVertical: 4 },
   tabButton: { flex: 1, paddingVertical: 10, alignItems: "center" },
   activeTabButton: { borderBottomWidth: 2, borderBottomColor: "#5865F2" },
@@ -204,7 +208,6 @@ const styles = StyleSheet.create({
   subFilterButton: { marginHorizontal: 6, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   activeSubFilter: { backgroundColor: "#404249" },
   subFilterText: { color: "#dbdee1", fontSize: 11, fontWeight: "bold" },
-  // Card List Styles
   feed: { flex: 1, padding: 12 },
   emptyText: { color: "#949ba4", textAlign: "center", marginTop: 40, fontSize: 14 },
   card: {
