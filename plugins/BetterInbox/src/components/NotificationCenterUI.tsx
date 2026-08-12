@@ -1,5 +1,5 @@
 import { React, ReactNative, NavigationNative, useProxy } from "@vendetta/metro/common";
-import { findByProps, findByDisplayName } from "@vendetta/metro";
+import { findByProps, findByName, findByDisplayName } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
 import {
   NotificationCategory,
@@ -8,17 +8,46 @@ import {
   LocalStorage,
 } from "../types";
 
-const { View, Text, TouchableOpacity, ScrollView, Image, StyleSheet } = ReactNative;
-const { useState, useMemo, useCallback } = React;
+const { View, Text, TouchableOpacity, ScrollView, StyleSheet } = ReactNative;
+const { useState, useMemo, useCallback, memo } = React;
 
 const Router = findByProps("transitionToGuild", "transitionTo");
 
-// Discord Native Component Lookups
+// Native UI Component Lookups
 const NativeTabs = findByDisplayName("Tabs");
 const nativeTabsModule = findByProps("useTabsState");
 const useTabsState = nativeTabsModule?.useTabsState;
 
 const NativeSegmentedControl = findByDisplayName("SegmentedControl");
+
+// Discord Native TableRow Components
+const TableRow = findByName("TableRow") || findByProps("TableRow")?.TableRow;
+const TableRowGroup = findByProps("TableRowGroup")?.TableRowGroup || View;
+const TableRowIcon = findByName("TableRowIcon") || findByProps("TableRowIcon")?.TableRowIcon;
+
+// 1. MEMOIZED TABLE ROW COMPONENT
+// Renders native Discord setting-style rows for ultimate performance
+const NotificationRow = memo(({ item, onPress }: { item: NotificationItem; onPress: () => void }) => {
+  const avatarUrl = item.author?.avatar
+    ? `https://cdn.discordapp.com/avatars/${item.author.id}/${item.author.avatar}.png`
+    : "https://cdn.discordapp.com/embed/avatars/0.png";
+
+  const subLabelText = `${item.guildName} • ${item.channelName}\n${item.content || ""}`.trim();
+
+  return (
+    <TableRow
+      label={item.title}
+      subLabel={subLabelText}
+      trailingText={item.timestamp}
+      icon={
+        TableRowIcon ? (
+          <TableRowIcon source={{ uri: avatarUrl }} style={styles.avatarIcon} />
+        ) : undefined
+      }
+      onPress={onPress}
+    />
+  );
+});
 
 export default function NotificationCenterUI(): JSX.Element {
   if (typeof useProxy === "function" && storage) {
@@ -29,7 +58,6 @@ export default function NotificationCenterUI(): JSX.Element {
     }
   }
 
-  // Pure React State for crisp, instant UI updates
   const [activeTabIdx, setActiveTabIdx] = useState<number>(0);
   const [mentionFilterIdx, setMentionFilterIdx] = useState<number>(0);
 
@@ -39,7 +67,6 @@ export default function NotificationCenterUI(): JSX.Element {
   const currentCategory = categories[activeTabIdx] ?? "mentions";
   const currentMentionFilter = subFilters[mentionFilterIdx] ?? "all";
 
-  // 1. Native Tabs state hook initialized with explicit state sync
   const tabsState = useTabsState
     ? useTabsState({
         items: categories.map((cat) => ({
@@ -50,17 +77,12 @@ export default function NotificationCenterUI(): JSX.Element {
       })
     : null;
 
-  // Sync Tabs state if used
-  const handleTabChange = (index: number) => {
-    setActiveTabIdx(index);
-  };
-
   const pluginStorage = (storage as LocalStorage) || { notifications: [] };
   const notifications: NotificationItem[] = pluginStorage.notifications || [];
 
-  // 2. Memoize list filtering to eliminate lag
-  const filteredNotifications = useMemo(() => {
-    return notifications.filter((n) => {
+  // Filter and limit items to top 30 for smooth rendering
+  const displayedNotifications = useMemo(() => {
+    const filtered = notifications.filter((n) => {
       if (currentCategory === "mentions") {
         if (n.category !== "mentions") return false;
         if (currentMentionFilter === "people") return n.subCategory === "people";
@@ -70,6 +92,8 @@ export default function NotificationCenterUI(): JSX.Element {
       }
       return n.category === currentCategory;
     });
+
+    return filtered.slice(0, 30);
   }, [notifications, currentCategory, currentMentionFilter]);
 
   const jumpToMessage = useCallback((guildId?: string, channelId?: string, messageId?: string): void => {
@@ -96,7 +120,7 @@ export default function NotificationCenterUI(): JSX.Element {
             activeIndex: activeTabIdx,
             setActiveIndex: (idx: number) => {
               tabsState.setActiveIndex?.(idx);
-              handleTabChange(idx);
+              setActiveTabIdx(idx);
             },
           }}
         />
@@ -154,42 +178,20 @@ export default function NotificationCenterUI(): JSX.Element {
         </View>
       )}
 
-      {/* Feed List */}
+      {/* Feed using Native TableRowGroup */}
       <ScrollView style={styles.feed} removeClippedSubviews={true}>
-        {filteredNotifications.length === 0 ? (
+        {displayedNotifications.length === 0 ? (
           <Text style={styles.emptyText}>No notifications found for this category.</Text>
         ) : (
-          filteredNotifications.map((item) => (
-            <TouchableOpacity
-              key={item.id || `${item.channelId}-${item.messageId}`}
-              style={styles.card}
-              onPress={() => jumpToMessage(item.guildId, item.channelId, item.messageId)}
-            >
-              <Image
-                source={{
-                  uri: item.author?.avatar
-                    ? `https://cdn.discordapp.com/avatars/${item.author.id}/${item.author.avatar}.png`
-                    : "https://cdn.discordapp.com/embed/avatars/0.png",
-                }}
-                style={styles.avatar}
+          <TableRowGroup title={`RECENT ${currentCategory.toUpperCase()}`}>
+            {displayedNotifications.map((item) => (
+              <NotificationRow
+                key={item.id || `${item.channelId}-${item.messageId}`}
+                item={item}
+                onPress={() => jumpToMessage(item.guildId, item.channelId, item.messageId)}
               />
-
-              <View style={styles.cardContent}>
-                <View style={styles.cardHeader}>
-                  <Text style={styles.authorTitle}>{item.title}</Text>
-                  <Text style={styles.timestamp}>{item.timestamp}</Text>
-                </View>
-
-                <Text style={styles.location}>
-                  {item.guildName} — {item.channelName}
-                </Text>
-
-                <Text style={styles.messageContent} numberOfLines={2}>
-                  {item.content}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          ))
+            ))}
+          </TableRowGroup>
         )}
       </ScrollView>
     </View>
@@ -208,21 +210,7 @@ const styles = StyleSheet.create({
   subFilterButton: { marginHorizontal: 6, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   activeSubFilter: { backgroundColor: "#404249" },
   subFilterText: { color: "#dbdee1", fontSize: 11, fontWeight: "bold" },
-  feed: { flex: 1, padding: 12 },
+  feed: { flex: 1, paddingHorizontal: 8, paddingVertical: 12 },
   emptyText: { color: "#949ba4", textAlign: "center", marginTop: 40, fontSize: 14 },
-  card: {
-    flexDirection: "row",
-    backgroundColor: "#2b2d31",
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 10,
-    alignItems: "center",
-  },
-  avatar: { width: 42, height: 42, borderRadius: 21, marginRight: 12 },
-  cardContent: { flex: 1 },
-  cardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  authorTitle: { color: "#f2f3f5", fontWeight: "bold", fontSize: 14 },
-  timestamp: { color: "#949ba4", fontSize: 11 },
-  location: { color: "#5865F2", fontSize: 12, marginVertical: 2, fontWeight: "500" },
-  messageContent: { color: "#dbdee1", fontSize: 13 },
+  avatarIcon: { width: 36, height: 36, borderRadius: 18 },
 });
