@@ -1,16 +1,19 @@
 import { FluxDispatcher } from "@vendetta/metro/common";
-import { findByStoreName } from "@vendetta/metro";
+import { findByStoreName, findByProps } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
 import type { LocalStorage, MentionSubCategory, NotificationItem } from "./types";
 import NotificationCenterUI from "./components/NotificationCenterUI";
 import { patchYouBar } from "./youbar";
 
-// Retrieve Discord Stores
+// Retrieve Discord Stores & Notification Utilities
 const UserStore: any = findByStoreName("UserStore");
 const ChannelStore: any = findByStoreName("ChannelStore");
 const GuildStore: any = findByStoreName("GuildStore");
 const MessageStore: any = findByStoreName("MessageStore");
 const GuildMemberStore: any = findByStoreName("GuildMemberStore");
+
+// Discord native notification utilities (Module 9803)
+const NotificationEngine: any = findByProps("shouldNotifyBase", "makeTextChatNotification");
 
 const pluginStorage = (storage as LocalStorage) || { notifications: [] };
 const unpatches: (() => void)[] = [];
@@ -23,26 +26,34 @@ function syncStorageDebounced() {
   if (saveTimeout) clearTimeout(saveTimeout);
   saveTimeout = setTimeout(() => {
     pluginStorage.notifications = memoryNotifications.slice(0, 100);
-  }, 5000);
+  }, 3000);
+}
+
+// Helper to push items avoiding duplicate IDs
+function pushNotification(item: NotificationItem) {
+  if (memoryNotifications.some((n) => n.id === item.id)) return;
+  memoryNotifications = [item, ...memoryNotifications];
+  syncStorageDebounced();
 }
 
 // -------------------------------------------------------------
 // 1. PROCESS TARGETED MENTIONS / REPLIES
 // -------------------------------------------------------------
-function processMentionMessage(channelId: string, messageId: string) {
+function processMentionMessage(channelId: string, messageId: string, rawMsg?: any) {
   try {
     const currentUser = UserStore?.getCurrentUser();
     if (!currentUser) return;
 
-    const msg = MessageStore?.getMessage(channelId, messageId);
+    // Use raw payload message if store cache miss occurs
+    const msg = MessageStore?.getMessage(channelId, messageId) || rawMsg;
     const channel = ChannelStore?.getChannel(channelId);
     if (!msg || !channel) return;
 
     const author = msg.author || UserStore?.getUser(msg.author?.id);
-    if (!author || author.id === currentUser.id) return; // Drop own actions
+    if (!author || author.id === currentUser.id) return; // Ignore self
 
     const guild = channel.guild_id ? GuildStore?.getGuild(channel.guild_id) : undefined;
-    const guildName = guild?.name || (channel.isGroupDM() ? "Group DM" : "Direct Message");
+    const guildName = guild?.name || (channel.isGroupDM ? (channel.isGroupDM() ? "Group DM" : "Direct Message") : "Direct Message");
     const channelName = channel.name ? `#${channel.name}` : "DM";
     const timestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
@@ -50,7 +61,7 @@ function processMentionMessage(channelId: string, messageId: string) {
       msg.type === 19 ||
       msg.referenced_message?.author?.id === currentUser.id;
 
-    let category: "mentions" | "replies" = isReply ? "replies" : "mentions";
+    const category: "mentions" | "replies" = isReply ? "replies" : "mentions";
     let subCategory: MentionSubCategory = "people";
 
     if (author.bot) {
@@ -78,8 +89,7 @@ function processMentionMessage(channelId: string, messageId: string) {
       author,
     };
 
-    memoryNotifications = [newNotification, ...memoryNotifications];
-    syncStorageDebounced();
+    pushNotification(newNotification);
   } catch (err) {
     console.error("[BetterInbox] Mention process error:", err);
   }
@@ -96,18 +106,17 @@ function handleIncomingMessage(payload: any) {
     const msg = payload?.message || payload;
     if (!msg || !msg.channel_id) return;
 
-    // Drop own messages instantly
     if (msg.author?.id === currentUser.id) return;
 
-    // FAST CHECK 1: Direct user mention
+    // Direct mention
     const isDirectMention = msg.mentions?.some((u: any) => u.id === currentUser.id);
 
-    // FAST CHECK 2: Reply to your message
+    // Reply check
     const isReplyToMe =
       msg.referenced_message?.author?.id === currentUser.id ||
       (msg.type === 19 && msg.referenced_message?.author?.id === currentUser.id);
 
-    // FAST CHECK 3: Role mention matching your roles
+    // Role mention check
     let isRoleMention = false;
     const msgRoles = msg.mention_roles || msg.mentionRoles || [];
     if (msgRoles.length > 0 && msg.guild_id) {
@@ -116,18 +125,16 @@ function handleIncomingMessage(payload: any) {
       isRoleMention = msgRoles.some((roleId: string) => myRoles.includes(roleId));
     }
 
-    // EARLY EXIT: If not for you, stop execution immediately (0.001ms overhead)
     if (!isDirectMention && !isReplyToMe && !isRoleMention) return;
 
-    // Process only guaranteed hits
-    processMentionMessage(msg.channel_id, msg.id);
+    processMentionMessage(msg.channel_id, msg.id, msg);
   } catch (err) {
     console.error("[BetterInbox] Incoming message check error:", err);
   }
 }
 
 // -------------------------------------------------------------
-// 3. REACTION HANDLER (Filtered to your messages)
+// 3. REACTION HANDLER (WITH FALLBACK FOR UNCACHED MESSAGES)
 // -------------------------------------------------------------
 function handleReactionAdd(payload: any): void {
   try {
@@ -141,11 +148,13 @@ function handleReactionAdd(payload: any): void {
     if (reactorId === currentUser.id) return;
 
     const targetMessage = MessageStore?.getMessage(channelId, targetMessageId);
-    if (!targetMessage || targetMessage.author?.id !== currentUser.id) return;
+    
+    // If target message is cached, verify ownership
+    if (targetMessage && targetMessage.author?.id !== currentUser.id) return;
 
     const channel = ChannelStore?.getChannel(channelId);
     const guild = channel?.guild_id ? GuildStore?.getGuild(channel.guild_id) : undefined;
-    const guildName = guild?.name || (channel?.isGroupDM() ? "Group DM" : "Direct Message");
+    const guildName = guild?.name || "Direct Message";
     const channelName = channel?.name ? `#${channel.name}` : "DM";
     const timestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
@@ -161,10 +170,12 @@ function handleReactionAdd(payload: any): void {
     const emojiName = payload.emoji?.name || "an emoji";
 
     const newNotification: NotificationItem = {
-      id: `${targetMessageId}-${reactorId}-${Date.now()}`,
+      id: `react-${targetMessageId}-${reactorId}`,
       category: "reactions",
       title: `${reactorName} reacted ${emojiName}`,
-      content: targetMessage?.content ? `"${targetMessage.content}"` : `Reacted to your message in ${channelName}`,
+      content: targetMessage?.content 
+        ? `"${targetMessage.content}"` 
+        : `Reacted to your message in ${channelName}`,
       guildName,
       channelName,
       guildId: guild?.id,
@@ -174,26 +185,26 @@ function handleReactionAdd(payload: any): void {
       author: finalAuthor,
     };
 
-    memoryNotifications = [newNotification, ...memoryNotifications];
-    syncStorageDebounced();
+    pushNotification(newNotification);
   } catch (err) {
     console.error("[BetterInbox] Reaction error:", err);
   }
 }
 
+// -------------------------------------------------------------
+// 4. MAIN LIFECYCLE
+// -------------------------------------------------------------
 export default {
   onLoad: () => {
-    console.log("[BetterInbox] Loaded with fast-exit MESSAGE_CREATE filter");
+    console.log("[BetterInbox] Initializing notification listener...");
 
     if (!pluginStorage.notifications) {
       pluginStorage.notifications = [];
     }
     memoryNotifications = [...pluginStorage.notifications];
 
-    // 1. Listen for incoming messages using the fast-exit filter
+    // Flux listeners for real-time capture
     FluxDispatcher.subscribe("MESSAGE_CREATE", handleIncomingMessage);
-
-    // 2. Listen for reactions on your messages
     FluxDispatcher.subscribe("MESSAGE_REACTION_ADD", handleReactionAdd);
 
     try {
