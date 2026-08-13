@@ -4,17 +4,12 @@ import { instead } from "@vendetta/patcher";
 import { getAssetIDByName } from "@vendetta/ui/assets";
 import NotificationCenterUI from "./components/NotificationCenterUI";
 
-// Retrieve Discord's native Navigator & Navigation modules
 const Navigation = findByProps("push", "pushLazy", "pop");
 const Navigator = findByName("Navigator") ?? findByProps("Navigator")?.Navigator;
 const modalCloseButton =
   findByProps("getRenderCloseButton")?.getRenderCloseButton ??
   findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
 
-/** 
- * Returns unpatch function on success, or null if YouBarNotificationsButton 
- * isn't registered in Metro yet.
- */
 export function patchYouBar(): (() => void) | null {
   const YouBarNotificationsButton = findByTypeName("YouBarNotificationsButton");
 
@@ -42,19 +37,21 @@ export function patchYouBar(): (() => void) | null {
           screens={{
             BetterInboxPage: {
               title: "Better Inbox",
-              headerLeft: modalCloseButton?.(() => Navigation.pop()),
+              headerLeft: modalCloseButton?.(() => Navigation?.pop?.()),
               render: () => <NotificationCenterUI />,
             },
           }}
         />
       );
 
-      if (Navigation?.push) {
+      if (typeof Navigation?.push === "function") {
         Navigation.push(InboxModal);
       } else {
         console.error("[BetterInbox] Navigation.push module not available");
       }
     };
+
+    if (!IconButton) return res;
 
     return (
       <IconButton
