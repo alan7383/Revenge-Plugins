@@ -1,36 +1,31 @@
-import { React, ReactNative, NavigationNative, useProxy } from "@vendetta/metro/common";
-import { findByProps, findByName, findByDisplayName } from "@vendetta/metro";
-import { storage } from "@vendetta/plugin";
-import type {
-  NotificationCategory,
-  MentionSubCategory,
-  NotificationItem,
-  LocalStorage,
-} from "../types";
+import { React, ReactNative, NavigationNative } from "@vendetta/metro/common";
+import { findByProps, findByDisplayName, findByName } from "@vendetta/metro";
+import { getNotifications, subscribeToNotifications } from "../notifications";
+import type { MentionSubCategory, NotificationCategory, NotificationItem } from "../types";
 
 const { View, Text, TouchableOpacity, ScrollView, Image, StyleSheet } = ReactNative;
-const { useState, useMemo, useCallback, memo } = React;
+const { useState, useMemo, useCallback, useEffect, useReducer, memo } = React;
 
-const ChannelNavigation = findByProps("selectChannel", "jumpToMessage");
 const Router = findByProps("transitionToGuild", "transitionTo");
-
 const NativeTabs = findByDisplayName("Tabs");
-const nativeTabsModule = findByProps("useTabsState");
-const useTabsState = nativeTabsModule?.useTabsState;
-
+const useTabsState = findByProps("useTabsState")?.useTabsState;
 const NativeSegmentedControl = findByDisplayName("SegmentedControl");
 
 const TableRow = findByName("TableRow") || findByProps("TableRow")?.TableRow;
 const TableRowGroup = findByProps("TableRowGroup")?.TableRowGroup || View;
 
+function categoryLabel(cat: NotificationCategory): string {
+  if (cat === "friend_request") return "Friends";
+  if (cat === "thread") return "Threads";
+  return cat.charAt(0).toUpperCase() + cat.slice(1);
+}
+
 function getAvatarUrl(author: any): string {
   if (!author) return "https://cdn.discordapp.com/embed/avatars/0.png";
-
   const { id, avatar, discriminator } = author;
 
   if (avatar) {
-    const isAnimated = typeof avatar === "string" && avatar.startsWith("a_");
-    const ext = isAnimated ? "gif" : "png";
+    const ext = typeof avatar === "string" && avatar.startsWith("a_") ? "gif" : "png";
     return `https://cdn.discordapp.com/avatars/${id}/${avatar}.${ext}?size=128`;
   }
 
@@ -46,90 +41,69 @@ function getAvatarUrl(author: any): string {
 }
 
 const NotificationRow = memo(({ item, onPress }: { item: NotificationItem; onPress: () => void }) => {
-  const avatarUrl = getAvatarUrl(item.author);
-  const subLabelText = `${item.guildName} • ${item.channelName}\n${item.content || ""}`.trim();
-
-  if (!TableRow) {
-    return (
-      <TouchableOpacity style={styles.fallbackRow} onPress={onPress}>
-        <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
-        <View style={styles.fallbackTextCol}>
-          <Text style={styles.fallbackTitle}>{item.title}</Text>
-          <Text style={styles.fallbackSub}>{subLabelText}</Text>
-        </View>
-        <Text style={styles.timestampText}>{item.timestamp}</Text>
-      </TouchableOpacity>
-    );
-  }
+  const subLabelText = item.guildName || item.channelName 
+    ? `${item.guildName} • ${item.channelName}\n${item.content || ""}`.trim()
+    : item.content;
 
   return (
     <TableRow
       label={item.title}
       subLabel={subLabelText}
       trailing={<Text style={styles.timestampText}>{item.timestamp}</Text>}
-      icon={<Image source={{ uri: avatarUrl }} style={styles.avatarImage} />}
+      icon={<Image source={{ uri: getAvatarUrl(item.author) }} style={styles.avatarImage} />}
       onPress={onPress}
     />
   );
 });
 
 export default function NotificationCenterUI(): JSX.Element {
-  if (typeof useProxy === "function" && storage) {
-    try {
-      useProxy(storage);
-    } catch (e) {
-      // Fallback if storage proxy fails
-    }
-  }
+  const [activeTabIdx, setActiveTabIdx] = useState(0);
+  const [mentionFilterIdx, setMentionFilterIdx] = useState(0);
 
-  const [activeTabIdx, setActiveTabIdx] = useState<number>(0);
-  const [mentionFilterIdx, setMentionFilterIdx] = useState<number>(0);
-
-  const categories: NotificationCategory[] = ["mentions", "replies", "reactions", "other"];
+  const categories: NotificationCategory[] = [
+    "mentions",
+    "replies",
+    "reactions",
+    "friend_request",
+    "thread",
+    "other",
+  ];
   const subFilters: Array<"all" | MentionSubCategory> = ["all", "people", "role", "bot"];
 
   const currentCategory = categories[activeTabIdx] ?? "mentions";
   const currentMentionFilter = subFilters[mentionFilterIdx] ?? "all";
 
-  const tabsState = typeof useTabsState === "function"
+  const tabsState = useTabsState
     ? useTabsState({
-        items: categories.map((cat) => ({
-          id: cat,
-          label: cat.charAt(0).toUpperCase() + cat.slice(1),
-        })),
+        items: categories.map((cat) => ({ id: cat, label: categoryLabel(cat) })),
         initialIndex: 0,
       })
     : null;
 
-  const pluginStorage = (storage as LocalStorage) || { notifications: [] };
-  const notifications: NotificationItem[] = pluginStorage.notifications || [];
+  const [, forceUpdate] = useReducer((x: number) => x + 1, 0);
+  useEffect(() => subscribeToNotifications(() => forceUpdate()), []);
+
+  const notifications = getNotifications();
 
   const displayedNotifications = useMemo(() => {
-    const filtered = notifications.filter((n) => {
-      if (currentCategory === "mentions") {
-        if (n.category !== "mentions") return false;
-        if (currentMentionFilter === "people") return n.subCategory === "people";
-        if (currentMentionFilter === "role") return n.subCategory === "role";
-        if (currentMentionFilter === "bot") return n.subCategory === "bot";
-        return true;
-      }
-      return n.category === currentCategory;
-    });
-
-    return filtered.slice(0, 30);
+    return notifications
+      .filter((n) => {
+        if (currentCategory === "mentions") {
+          if (n.category !== "mentions") return false;
+          if (currentMentionFilter === "all") return true;
+          return n.subCategory === currentMentionFilter;
+        }
+        return n.category === currentCategory;
+      })
+      .slice(0, 30);
   }, [notifications, currentCategory, currentMentionFilter]);
 
-  const jumpToMessage = useCallback((guildId?: string, channelId?: string, messageId?: string): void => {
-    if (!channelId) return;
-
+  const jumpToMessage = useCallback((guildId?: string, channelId?: string, messageId?: string) => {
+    if (!channelId && !guildId) return;
     try {
-      if (typeof ChannelNavigation?.jumpToMessage === "function" && messageId) {
-        ChannelNavigation.jumpToMessage({ channelId, messageId });
-      } else if (typeof ChannelNavigation?.selectChannel === "function") {
-        ChannelNavigation.selectChannel({ guildId: guildId || "@me", channelId });
-      } else if (typeof Router?.transitionToGuild === "function") {
+      if (Router?.transitionToGuild) {
         Router.transitionToGuild(guildId || "@me", channelId, messageId);
-      } else if (typeof NavigationNative?.navigate === "function") {
+      } else if (NavigationNative?.navigate) {
         NavigationNative.navigate("Channel", { guildId, channelId, messageId });
       }
     } catch (err) {
@@ -145,7 +119,7 @@ export default function NotificationCenterUI(): JSX.Element {
             ...tabsState,
             activeIndex: activeTabIdx,
             setActiveIndex: (idx: number) => {
-              tabsState?.setActiveIndex?.(idx);
+              tabsState.setActiveIndex?.(idx);
               setActiveTabIdx(idx);
             },
           }}
@@ -159,7 +133,7 @@ export default function NotificationCenterUI(): JSX.Element {
               onPress={() => setActiveTabIdx(idx)}
             >
               <Text style={[styles.tabText, activeTabIdx === idx && styles.activeTabText]}>
-                {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                {categoryLabel(tab)}
               </Text>
             </TouchableOpacity>
           ))}
@@ -171,17 +145,14 @@ export default function NotificationCenterUI(): JSX.Element {
           {NativeSegmentedControl ? (
             <NativeSegmentedControl
               value={currentMentionFilter}
-              options={subFilters.map((sub) => ({
-                value: sub,
-                label: sub.toUpperCase(),
-              }))}
+              options={subFilters.map((sub) => ({ value: sub, label: sub.toUpperCase() }))}
               onChange={(val: string) => {
-                const targetIdx = subFilters.indexOf(val as any);
-                if (targetIdx !== -1) setMentionFilterIdx(targetIdx);
+                const idx = subFilters.indexOf(val as any);
+                if (idx !== -1) setMentionFilterIdx(idx);
               }}
               onValueChange={(val: string) => {
-                const targetIdx = subFilters.indexOf(val as any);
-                if (targetIdx !== -1) setMentionFilterIdx(targetIdx);
+                const idx = subFilters.indexOf(val as any);
+                if (idx !== -1) setMentionFilterIdx(idx);
               }}
             />
           ) : (
@@ -189,10 +160,7 @@ export default function NotificationCenterUI(): JSX.Element {
               {subFilters.map((sub, idx) => (
                 <TouchableOpacity
                   key={sub}
-                  style={[
-                    styles.subFilterButton,
-                    mentionFilterIdx === idx && styles.activeSubFilter,
-                  ]}
+                  style={[styles.subFilterButton, mentionFilterIdx === idx && styles.activeSubFilter]}
                   onPress={() => setMentionFilterIdx(idx)}
                 >
                   <Text style={styles.subFilterText}>{sub.toUpperCase()}</Text>
@@ -203,14 +171,14 @@ export default function NotificationCenterUI(): JSX.Element {
         </View>
       )}
 
-      <ScrollView style={styles.feed} removeClippedSubviews={true}>
+      <ScrollView style={styles.feed} removeClippedSubviews>
         {displayedNotifications.length === 0 ? (
           <Text style={styles.emptyText}>No notifications found for this category.</Text>
         ) : (
-          <TableRowGroup title={`RECENT ${currentCategory.toUpperCase()}`}>
+          <TableRowGroup title={`RECENT ${categoryLabel(currentCategory).toUpperCase()}`}>
             {displayedNotifications.map((item) => (
               <NotificationRow
-                key={item.id || `${item.channelId}-${item.messageId}`}
+                key={item.id}
                 item={item}
                 onPress={() => jumpToMessage(item.guildId, item.channelId, item.messageId)}
               />
@@ -238,15 +206,4 @@ const styles = StyleSheet.create({
   emptyText: { color: "#949ba4", textAlign: "center", marginTop: 40, fontSize: 14 },
   avatarImage: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#4e5058" },
   timestampText: { color: "#949ba4", fontSize: 11, alignSelf: "center" },
-  fallbackRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 10,
-    backgroundColor: "#2b2d31",
-    marginBottom: 6,
-    borderRadius: 8,
-  },
-  fallbackTextCol: { flex: 1, marginHorizontal: 10 },
-  fallbackTitle: { color: "#ffffff", fontWeight: "bold", fontSize: 13 },
-  fallbackSub: { color: "#949ba4", fontSize: 11 },
 });
