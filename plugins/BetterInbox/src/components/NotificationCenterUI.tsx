@@ -1,7 +1,7 @@
 import { React, ReactNative, NavigationNative, useProxy } from "@vendetta/metro/common";
 import { findByProps, findByName, findByDisplayName } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
-import {
+import type {
   NotificationCategory,
   MentionSubCategory,
   NotificationItem,
@@ -11,20 +11,18 @@ import {
 const { View, Text, TouchableOpacity, ScrollView, Image, StyleSheet } = ReactNative;
 const { useState, useMemo, useCallback, memo } = React;
 
+const ChannelNavigation = findByProps("selectChannel", "jumpToMessage");
 const Router = findByProps("transitionToGuild", "transitionTo");
 
-// Native UI Component Lookups
 const NativeTabs = findByDisplayName("Tabs");
 const nativeTabsModule = findByProps("useTabsState");
 const useTabsState = nativeTabsModule?.useTabsState;
 
 const NativeSegmentedControl = findByDisplayName("SegmentedControl");
 
-// Native Discord TableRow Components
 const TableRow = findByName("TableRow") || findByProps("TableRow")?.TableRow;
 const TableRowGroup = findByProps("TableRowGroup")?.TableRowGroup || View;
 
-// Helper to reliably compute Discord avatar URLs
 function getAvatarUrl(author: any): string {
   if (!author) return "https://cdn.discordapp.com/embed/avatars/0.png";
 
@@ -36,33 +34,40 @@ function getAvatarUrl(author: any): string {
     return `https://cdn.discordapp.com/avatars/${id}/${avatar}.${ext}?size=128`;
   }
 
-  // Handle Default Discord Avatars (legacy vs pomelo usernames)
   try {
-    const defaultIndex = discriminator && discriminator !== "0"
-      ? parseInt(discriminator, 10) % 5
-      : Number((BigInt(id || "0") >> 22n) % 6n);
+    const defaultIndex =
+      discriminator && discriminator !== "0"
+        ? parseInt(discriminator, 10) % 5
+        : Number((BigInt(id || "0") >> 22n) % 6n);
     return `https://cdn.discordapp.com/embed/avatars/${defaultIndex}.png`;
   } catch {
     return "https://cdn.discordapp.com/embed/avatars/0.png";
   }
 }
 
-// 1. MEMOIZED ROW COMPONENT
 const NotificationRow = memo(({ item, onPress }: { item: NotificationItem; onPress: () => void }) => {
   const avatarUrl = getAvatarUrl(item.author);
   const subLabelText = `${item.guildName} • ${item.channelName}\n${item.content || ""}`.trim();
+
+  if (!TableRow) {
+    return (
+      <TouchableOpacity style={styles.fallbackRow} onPress={onPress}>
+        <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
+        <View style={styles.fallbackTextCol}>
+          <Text style={styles.fallbackTitle}>{item.title}</Text>
+          <Text style={styles.fallbackSub}>{subLabelText}</Text>
+        </View>
+        <Text style={styles.timestampText}>{item.timestamp}</Text>
+      </TouchableOpacity>
+    );
+  }
 
   return (
     <TableRow
       label={item.title}
       subLabel={subLabelText}
       trailing={<Text style={styles.timestampText}>{item.timestamp}</Text>}
-      icon={
-        <Image
-          source={{ uri: avatarUrl }}
-          style={styles.avatarImage}
-        />
-      }
+      icon={<Image source={{ uri: avatarUrl }} style={styles.avatarImage} />}
       onPress={onPress}
     />
   );
@@ -73,7 +78,7 @@ export default function NotificationCenterUI(): JSX.Element {
     try {
       useProxy(storage);
     } catch (e) {
-      // Ignored
+      // Fallback if storage proxy fails
     }
   }
 
@@ -86,7 +91,7 @@ export default function NotificationCenterUI(): JSX.Element {
   const currentCategory = categories[activeTabIdx] ?? "mentions";
   const currentMentionFilter = subFilters[mentionFilterIdx] ?? "all";
 
-  const tabsState = useTabsState
+  const tabsState = typeof useTabsState === "function"
     ? useTabsState({
         items: categories.map((cat) => ({
           id: cat,
@@ -115,12 +120,16 @@ export default function NotificationCenterUI(): JSX.Element {
   }, [notifications, currentCategory, currentMentionFilter]);
 
   const jumpToMessage = useCallback((guildId?: string, channelId?: string, messageId?: string): void => {
-    if (!channelId || !messageId) return;
+    if (!channelId) return;
 
     try {
-      if (Router?.transitionToGuild) {
+      if (typeof ChannelNavigation?.jumpToMessage === "function" && messageId) {
+        ChannelNavigation.jumpToMessage({ channelId, messageId });
+      } else if (typeof ChannelNavigation?.selectChannel === "function") {
+        ChannelNavigation.selectChannel({ guildId: guildId || "@me", channelId });
+      } else if (typeof Router?.transitionToGuild === "function") {
         Router.transitionToGuild(guildId || "@me", channelId, messageId);
-      } else if (NavigationNative?.navigate) {
+      } else if (typeof NavigationNative?.navigate === "function") {
         NavigationNative.navigate("Channel", { guildId, channelId, messageId });
       }
     } catch (err) {
@@ -130,14 +139,13 @@ export default function NotificationCenterUI(): JSX.Element {
 
   return (
     <View style={styles.container}>
-      {/* Category Tabs */}
       {NativeTabs && tabsState ? (
         <NativeTabs
           state={{
             ...tabsState,
             activeIndex: activeTabIdx,
             setActiveIndex: (idx: number) => {
-              tabsState.setActiveIndex?.(idx);
+              tabsState?.setActiveIndex?.(idx);
               setActiveTabIdx(idx);
             },
           }}
@@ -158,7 +166,6 @@ export default function NotificationCenterUI(): JSX.Element {
         </View>
       )}
 
-      {/* Mention Sub-Filter Control */}
       {currentCategory === "mentions" && (
         <View style={styles.subFilterWrapper}>
           {NativeSegmentedControl ? (
@@ -196,7 +203,6 @@ export default function NotificationCenterUI(): JSX.Element {
         </View>
       )}
 
-      {/* Feed with TableRowGroup */}
       <ScrollView style={styles.feed} removeClippedSubviews={true}>
         {displayedNotifications.length === 0 ? (
           <Text style={styles.emptyText}>No notifications found for this category.</Text>
@@ -232,4 +238,15 @@ const styles = StyleSheet.create({
   emptyText: { color: "#949ba4", textAlign: "center", marginTop: 40, fontSize: 14 },
   avatarImage: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#4e5058" },
   timestampText: { color: "#949ba4", fontSize: 11, alignSelf: "center" },
+  fallbackRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 10,
+    backgroundColor: "#2b2d31",
+    marginBottom: 6,
+    borderRadius: 8,
+  },
+  fallbackTextCol: { flex: 1, marginHorizontal: 10 },
+  fallbackTitle: { color: "#ffffff", fontWeight: "bold", fontSize: 13 },
+  fallbackSub: { color: "#949ba4", fontSize: 11 },
 });
