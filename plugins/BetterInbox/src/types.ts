@@ -27,4 +27,3 @@ export interface NotificationItem {
 export interface LocalStorage {
   notifications: NotificationItem[];
 }
-
