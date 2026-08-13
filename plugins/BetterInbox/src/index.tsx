@@ -1,11 +1,10 @@
 import { FluxDispatcher } from "@vendetta/metro/common";
-import { findByStoreName, findByProps } from "@vendetta/metro";
+import { findByStoreName } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
 import type { LocalStorage, MentionSubCategory, NotificationItem } from "./types";
 import NotificationCenterUI from "./components/NotificationCenterUI";
 import { patchYouBar } from "./youbar";
 
-// Retrieve Discord Stores
 const UserStore: any = findByStoreName("UserStore");
 const ChannelStore: any = findByStoreName("ChannelStore");
 const GuildStore: any = findByStoreName("GuildStore");
@@ -53,23 +52,20 @@ function attemptYouBarPatch() {
   }
 }
 
-// -------------------------------------------------------------
-// 1. PROCESS TARGETED MENTIONS / REPLIES
-// -------------------------------------------------------------
 function processMentionMessage(channelId: string, messageId: string, rawMsg?: any) {
   try {
-    const currentUser = UserStore?.getCurrentUser();
+    const currentUser = UserStore?.getCurrentUser?.();
     if (!currentUser) return;
 
-    const msg = MessageStore?.getMessage(channelId, messageId) || rawMsg;
-    const channel = ChannelStore?.getChannel(channelId);
+    const msg = MessageStore?.getMessage?.(channelId, messageId) || rawMsg;
+    const channel = ChannelStore?.getChannel?.(channelId);
     if (!msg || !channel) return;
 
-    const author = msg.author || UserStore?.getUser(msg.author?.id);
+    const author = msg.author || UserStore?.getUser?.(msg.author?.id);
     if (!author || author.id === currentUser.id) return;
 
-    const guild = channel.guild_id ? GuildStore?.getGuild(channel.guild_id) : undefined;
-    const guildName = guild?.name || (channel.isGroupDM ? (channel.isGroupDM() ? "Group DM" : "Direct Message") : "Direct Message");
+    const guild = channel.guild_id ? GuildStore?.getGuild?.(channel.guild_id) : undefined;
+    const guildName = guild?.name || (typeof channel.isGroupDM === "function" ? (channel.isGroupDM() ? "Group DM" : "Direct Message") : "Direct Message");
     const channelName = channel.name ? `#${channel.name}` : "DM";
     const timestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
@@ -111,12 +107,9 @@ function processMentionMessage(channelId: string, messageId: string, rawMsg?: an
   }
 }
 
-// -------------------------------------------------------------
-// 2. FAST-EXIT INCOMING MESSAGE FILTER
-// -------------------------------------------------------------
 function handleIncomingMessage(payload: any) {
   try {
-    const currentUser = UserStore?.getCurrentUser();
+    const currentUser = UserStore?.getCurrentUser?.();
     if (!currentUser) return;
 
     const msg = payload?.message || payload;
@@ -133,7 +126,7 @@ function handleIncomingMessage(payload: any) {
     let isRoleMention = false;
     const msgRoles = msg.mention_roles || msg.mentionRoles || [];
     if (msgRoles.length > 0 && msg.guild_id) {
-      const myMember = GuildMemberStore?.getMember(msg.guild_id, currentUser.id);
+      const myMember = GuildMemberStore?.getMember?.(msg.guild_id, currentUser.id);
       const myRoles: string[] = myMember?.roles || [];
       isRoleMention = msgRoles.some((roleId: string) => myRoles.includes(roleId));
     }
@@ -146,12 +139,9 @@ function handleIncomingMessage(payload: any) {
   }
 }
 
-// -------------------------------------------------------------
-// 3. REACTION HANDLER
-// -------------------------------------------------------------
 function handleReactionAdd(payload: any): void {
   try {
-    const currentUser = UserStore?.getCurrentUser();
+    const currentUser = UserStore?.getCurrentUser?.();
     if (!currentUser) return;
 
     const channelId = payload.channel_id || payload.channelId;
@@ -160,17 +150,17 @@ function handleReactionAdd(payload: any): void {
 
     if (reactorId === currentUser.id) return;
 
-    const targetMessage = MessageStore?.getMessage(channelId, targetMessageId);
+    const targetMessage = MessageStore?.getMessage?.(channelId, targetMessageId);
 
     if (targetMessage && targetMessage.author?.id !== currentUser.id) return;
 
-    const channel = ChannelStore?.getChannel(channelId);
-    const guild = channel?.guild_id ? GuildStore?.getGuild(channel.guild_id) : undefined;
+    const channel = ChannelStore?.getChannel?.(channelId);
+    const guild = channel?.guild_id ? GuildStore?.getGuild?.(channel.guild_id) : undefined;
     const guildName = guild?.name || "Direct Message";
     const channelName = channel?.name ? `#${channel.name}` : "DM";
     const timestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-    const reactorUser = payload.member?.user || payload.user || UserStore?.getUser(reactorId);
+    const reactorUser = payload.member?.user || payload.user || UserStore?.getUser?.(reactorId);
     const finalAuthor = reactorUser || {
       id: reactorId,
       username: payload.member?.nick || "Someone",
@@ -203,9 +193,6 @@ function handleReactionAdd(payload: any): void {
   }
 }
 
-// -------------------------------------------------------------
-// 4. MAIN LIFECYCLE
-// -------------------------------------------------------------
 export default {
   onLoad: () => {
     console.log("[BetterInbox] Initializing plugin...");
@@ -218,7 +205,6 @@ export default {
     FluxDispatcher.subscribe("MESSAGE_CREATE", handleIncomingMessage);
     FluxDispatcher.subscribe("MESSAGE_REACTION_ADD", handleReactionAdd);
 
-    // Attempt immediately, then fall back to interval retries (~9s max)
     attemptYouBarPatch();
     let ticks = 0;
     retryHandle = setInterval(() => {
