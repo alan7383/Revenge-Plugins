@@ -1,7 +1,14 @@
-export type NotificationCategory = "mentions" | "replies" | "reactions" | "other";
+export type NotificationCategory =
+  | "mentions"
+  | "replies"
+  | "reactions"
+  | "friend_request"
+  | "thread"
+  | "other";
+
 export type MentionSubCategory = "people" | "bot" | "role";
 
-export interface Author {
+export interface NotificationAuthor {
   id: string;
   username: string;
   globalName?: string;
@@ -21,9 +28,12 @@ export interface NotificationItem {
   channelId?: string;
   messageId?: string;
   timestamp: string;
-  author?: Author;
+  author?: NotificationAuthor;
 }
 
 export interface LocalStorage {
-  notifications: NotificationItem[];
+  showDMButton?: boolean;
+  showSettingsButton?: boolean;
+  showInboxButton?: boolean;
+  notifications?: NotificationItem[];
 }
