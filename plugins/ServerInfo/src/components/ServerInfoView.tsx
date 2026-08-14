@@ -1,17 +1,27 @@
 import { React, ReactNative as RN } from "@vendetta/metro/common";
-import { findByProps, findByStoreName } from "@vendetta/metro";
+import { findByProps, findByStoreName, findByName } from "@vendetta/metro";
 import { rawColors, semanticColors } from "@vendetta/ui";
+import { TableRow, TableRowGroup } from "@vendetta/ui/components";
 
 const ActionSheet = findByProps("ActionSheet")?.ActionSheet;
 const ASCBMod = findByProps("ActionSheetCloseButton");
 const ActionSheetCloseButton = ASCBMod?.ActionSheetCloseButton;
 const { hideActionSheet } = findByProps("openLazy", "hideActionSheet") ?? {};
 
+// Stores & Actions
+const GuildStore = findByStoreName("GuildStore");
+const GuildMemberStore = findByStoreName("GuildMemberStore");
+const UserStore = findByStoreName("UserStore");
+const ThemeStore = findByStoreName("ThemeStore");
+
+const showUserProfile = findByName("showUserProfileActionSheet") 
+    ?? findByProps("openUserProfileModal")?.openUserProfileModal 
+    ?? findByProps("showUserProfile")?.showUserProfile 
+    ?? findByProps("openUserProfile")?.openUserProfile;
+
 const TextStyleSheet = findByProps("TextStyleSheet")?.TextStyleSheet;
 const colorModule = findByProps("colors", "unsafe_rawColors");
 const colorResolver = colorModule?.internal ?? colorModule?.meta;
-const ThemeStore = findByStoreName("ThemeStore");
-const GuildStore = findByStoreName("GuildStore");
 
 function sc(key: string): string {
     const t = ThemeStore?.theme ?? "dark";
@@ -40,48 +50,131 @@ export default function ServerInfoView({ guildId }: { guildId: string }) {
     const guild = GuildStore?.getGuild?.(guildId);
     if (!guild) return null;
 
-    const memberCount = guild.memberCount ?? "Unknown";
-    const ownerId = guild.ownerId ?? "Unknown";
+    // Fetch accurate member count
+    const memberCount = guild.memberCount 
+        ?? GuildMemberStore?.getMemberIds?.(guildId)?.length 
+        ?? "Unknown";
+
+    // Fetch Owner Details
+    const ownerId = guild.ownerId;
+    const ownerMember = ownerId ? GuildMemberStore?.getMember?.(guildId, ownerId) : null;
+    const ownerUser = ownerId ? UserStore?.getUser?.(ownerId) : null;
+
+    const ownerName = ownerMember?.nick 
+        ?? ownerUser?.globalName 
+        ?? ownerUser?.username 
+        ?? (ownerId ? `User (${ownerId.slice(0, 6)})` : "Unknown");
+
+    const ownerAvatar = ownerUser?.getAvatarURL?.(true, 64) 
+        ?? (ownerId ? `https://cdn.discordapp.com/embed/avatars/${Number((BigInt(ownerId) >> 22n) % 6n)}.png` : null);
+
+    // Images
+    const iconUrl = guild.getIconURL?.() ?? null;
+    const bannerUrl = guild.getBannerURL?.() ?? null;
+
+    // Creation Date
     const createdDate = new Date(
         Number(BigInt(guildId) >> 22n) + 1420070400000
-    ).toLocaleDateString();
+    ).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 
-    const iconUrl = guild.getIconURL?.() ?? null;
+    const handleOwnerPress = () => {
+        if (!ownerId) return;
+        hideActionSheet?.();
+        showUserProfile?.({ userId: ownerId });
+    };
 
     return (
         <ActionSheet>
+            {/* Header / Navigation bar */}
             <RN.View style={{ flexDirection: "row", alignItems: "center", paddingVertical: 12, paddingHorizontal: 16 }}>
-                {iconUrl && (
-                    <RN.Image
-                        source={{ uri: iconUrl }}
-                        style={{ width: 28, height: 28, borderRadius: 14, marginRight: 10 }}
-                    />
+                <T variant="heading-md/bold" style={{ flex: 1 }}>Server Information</T>
+                {ActionSheetCloseButton ? (
+                    <ActionSheetCloseButton onPress={() => hideActionSheet?.()} />
+                ) : (
+                    <T variant="text-md/semibold" style={{ color: rawColors.BRAND_500 }} onPress={() => hideActionSheet?.()}>
+                        Close
+                    </T>
                 )}
-                <T variant="heading-md/semibold" style={{ flex: 1 }}>{guild.name}</T>
-                {ActionSheetCloseButton
-                    ? <ActionSheetCloseButton onPress={() => { hideActionSheet?.(); }} />
-                    : <T variant="text-md/semibold" style={{ color: rawColors.BRAND_500 }} onPress={() => { hideActionSheet?.(); }}>Close</T>}
             </RN.View>
 
-            <RN.ScrollView style={{ flex: 1, padding: 16 }}>
-                <RN.View style={{ paddingVertical: 10, borderBottomWidth: 0.5, borderBottomColor: sc("background-modifier-accent") }}>
-                    <T variant="text-xs/bold" style={{ color: sc("text-muted"), textTransform: "uppercase" }}>Server ID</T>
-                    <T variant="text-md/medium" style={{ marginTop: 2 }}>{guildId}</T>
+            <RN.ScrollView style={{ flex: 1 }}>
+                {/* Banner & Icon Header Visual */}
+                <RN.View style={{ alignItems: "center", marginBottom: 16 }}>
+                    <RN.View style={{ width: "100%", height: 100, backgroundColor: sc("background-tertiary") }}>
+                        {bannerUrl && (
+                            <RN.Image
+                                source={{ uri: bannerUrl }}
+                                style={{ width: "100%", height: "100%", resizeMode: "cover" }}
+                            />
+                        )}
+                    </RN.View>
+
+                    <RN.View style={{ marginTop: -35, alignItems: "center" }}>
+                        {iconUrl ? (
+                            <RN.Image
+                                source={{ uri: iconUrl }}
+                                style={{
+                                    width: 70,
+                                    height: 70,
+                                    borderRadius: 35,
+                                    borderWidth: 3,
+                                    borderColor: sc("background-floating"),
+                                }}
+                            />
+                        ) : (
+                            <RN.View
+                                style={{
+                                    width: 70,
+                                    height: 70,
+                                    borderRadius: 35,
+                                    borderWidth: 3,
+                                    borderColor: sc("background-floating"),
+                                    backgroundColor: sc("background-accent"),
+                                    justifyContent: "center",
+                                    alignItems: "center",
+                                }}
+                            >
+                                <T variant="heading-lg/bold">{guild.name?.slice(0, 2)}</T>
+                            </RN.View>
+                        )}
+                        <T variant="heading-lg/bold" style={{ marginTop: 8, textAlign: "center" }}>
+                            {guild.name}
+                        </T>
+                    </RN.View>
                 </RN.View>
 
-                <RN.View style={{ paddingVertical: 10, borderBottomWidth: 0.5, borderBottomColor: sc("background-modifier-accent") }}>
-                    <T variant="text-xs/bold" style={{ color: sc("text-muted"), textTransform: "uppercase" }}>Members</T>
-                    <T variant="text-md/medium" style={{ marginTop: 2 }}>{memberCount}</T>
-                </RN.View>
-
-                <RN.View style={{ paddingVertical: 10, borderBottomWidth: 0.5, borderBottomColor: sc("background-modifier-accent") }}>
-                    <T variant="text-xs/bold" style={{ color: sc("text-muted"), textTransform: "uppercase" }}>Created On</T>
-                    <T variant="text-md/medium" style={{ marginTop: 2 }}>{createdDate}</T>
-                </RN.View>
-
-                <RN.View style={{ paddingVertical: 10 }}>
-                    <T variant="text-xs/bold" style={{ color: sc("text-muted"), textTransform: "uppercase" }}>Owner ID</T>
-                    <T variant="text-md/medium" style={{ marginTop: 2 }}>{ownerId}</T>
+                {/* Information Sections via TableRows */}
+                <RN.View style={{ paddingHorizontal: 16, paddingBottom: 24 }}>
+                    <TableRowGroup title="SERVER OVERVIEW">
+                        {ownerId && (
+                            <TableRow
+                                label="Owner"
+                                subLabel={ownerName}
+                                icon={
+                                    ownerAvatar ? (
+                                        <RN.Image
+                                            source={{ uri: ownerAvatar }}
+                                            style={{ width: 24, height: 24, borderRadius: 12 }}
+                                        />
+                                    ) : undefined
+                                }
+                                onPress={handleOwnerPress}
+                                arrow
+                            />
+                        )}
+                        <TableRow
+                            label="Members"
+                            subLabel={String(memberCount)}
+                        />
+                        <TableRow
+                            label="Created On"
+                            subLabel={createdDate}
+                        />
+                        <TableRow
+                            label="Server ID"
+                            subLabel={guildId}
+                        />
+                    </TableRowGroup>
                 </RN.View>
             </RN.ScrollView>
         </ActionSheet>
