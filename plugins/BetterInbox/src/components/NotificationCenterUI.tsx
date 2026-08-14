@@ -1,4 +1,4 @@
-import { React, ReactNative, NavigationNative } from "@vendetta/metro/common";
+import { React, ReactNative, NavigationNative, FluxDispatcher } from "@vendetta/metro/common";
 import { findByProps, findByDisplayName, findByName } from "@vendetta/metro";
 import { getNotifications, subscribeToNotifications, clearNotifications } from "../notifications";
 import type { MentionSubCategory, NotificationCategory, NotificationItem } from "../types";
@@ -13,6 +13,11 @@ const NativeSegmentedControl = findByDisplayName("SegmentedControl");
 
 const TableRow = findByName("TableRow") || findByProps("TableRow")?.TableRow;
 const TableRowGroup = findByProps("TableRowGroup")?.TableRowGroup || View;
+
+// Profile action module verified via in-app eval
+const UserProfileActions = findByProps("openUserProfileModal") 
+  || findByProps("showUserProfile") 
+  || findByProps("openUserProfile");
 
 function categoryLabel(cat: NotificationCategory): string {
   if (cat === "friend_request") return "Friends";
@@ -103,16 +108,39 @@ export default function NotificationCenterUI(): JSX.Element {
     return filtered;
   }, [notifications, currentCategory, currentMentionFilter]);
 
-  const jumpToMessage = useCallback((guildId?: string, channelId?: string, messageId?: string) => {
-    if (!channelId && !guildId) return;
-    try {
-      if (Router?.transitionToGuild) {
-        Router.transitionToGuild(guildId || "@me", channelId, messageId);
-      } else if (NavigationNative?.navigate) {
-        NavigationNative.navigate("Channel", { guildId, channelId, messageId });
+  const handleNotificationPress = useCallback((item: NotificationItem) => {
+    // Friend requests (or items without channel/guild) open user profile directly
+    if ((item.category === "friend_request" || (!item.channelId && !item.guildId)) && item.author?.id) {
+      if (UserProfileActions?.openUserProfileModal) {
+        UserProfileActions.openUserProfileModal({ userId: item.author.id });
+      } else if (UserProfileActions?.showUserProfile) {
+        UserProfileActions.showUserProfile({ userId: item.author.id });
+      } else if (UserProfileActions?.openUserProfile) {
+        UserProfileActions.openUserProfile({ userId: item.author.id });
+      } else {
+        FluxDispatcher.dispatch({
+          type: "USER_PROFILE_MODAL_OPEN",
+          userId: item.author.id,
+        });
       }
-    } catch (err) {
-      console.error("[BetterInbox] Navigation error:", err);
+      return;
+    }
+
+    // Otherwise jump to message location in chat
+    if (item.channelId || item.guildId) {
+      try {
+        if (Router?.transitionToGuild) {
+          Router.transitionToGuild(item.guildId || "@me", item.channelId, item.messageId);
+        } else if (NavigationNative?.navigate) {
+          NavigationNative.navigate("Channel", {
+            guildId: item.guildId,
+            channelId: item.channelId,
+            messageId: item.messageId,
+          });
+        }
+      } catch (err) {
+        console.error("[BetterInbox] Navigation error:", err);
+      }
     }
   }, []);
 
@@ -195,7 +223,7 @@ export default function NotificationCenterUI(): JSX.Element {
               <NotificationRow
                 key={item.id}
                 item={item}
-                onPress={() => jumpToMessage(item.guildId, item.channelId, item.messageId)}
+                onPress={() => handleNotificationPress(item)}
               />
             ))}
           </TableRowGroup>
