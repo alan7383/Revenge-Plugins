@@ -332,7 +332,7 @@ export default function ServerInfoView({ guildId }: { guildId: string }) {
                             />
                         )}
                         {vanityCode && <RowComponent label="Vanity URL" subLabel={vanityCode} />}
-                        <RowComponent label="Created On" subLabel={createdDate} />}
+                        <RowComponent label="Created On" subLabel={createdDate} />
                         <RowComponent label="Server ID" subLabel={guildId} />
                     </GroupContainer>
                 </RN.View>
