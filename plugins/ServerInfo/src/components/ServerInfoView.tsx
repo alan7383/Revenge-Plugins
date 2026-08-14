@@ -25,12 +25,9 @@ const HeaderCountsStore = findByStoreName("GuildHeaderCountsStore") ?? MemberCou
 
 // Network & API Modules
 const RestAPI = findByProps("get", "post", "del", "patch");
-const UserFetchModule = findByProps("fetchProfile", "getUser") ?? findByProps("fetchProfile");
-const showUserProfile = 
-    findByName("showUserProfileActionSheet", false) 
-    ?? findByProps("openUserProfileModal")?.openUserProfileModal 
-    ?? findByProps("showUserProfile")?.showUserProfile 
-    ?? findByProps("openUserProfile")?.openUserProfile;
+
+// Profile Opener (Safely fallback through known Discord profile handlers)
+const ProfileModalModule = findByProps("openUserProfileModal", "openUserProfile") ?? findByProps("showUserProfile");
 
 const TextStyleSheet = findByProps("TextStyleSheet")?.TextStyleSheet;
 const colorModule = findByProps("colors", "unsafe_rawColors");
@@ -115,13 +112,13 @@ export default function ServerInfoView({ guildId }: { guildId: string }) {
 
     const guild = GuildStore?.getGuild?.(guildId);
     
-    // Cached owner state
+    // Cached owner state initialization
     const cachedOwner = ownerCache.get(guildId);
     const [ownerId, setOwnerId] = React.useState<string | null>(guild?.ownerId ?? cachedOwner?.id ?? null);
     const [ownerName, setOwnerName] = React.useState<string | null>(cachedOwner?.name ?? null);
     const [ownerAvatarHash, setOwnerAvatarHash] = React.useState<string | null>(cachedOwner?.avatar ?? null);
 
-    // Fetch Guild Owner ID if missing
+    // 1. Fetch Guild Owner ID if missing from Store
     React.useEffect(() => {
         if (ownerId || !RestAPI?.get) return;
         let cancelled = false;
@@ -129,7 +126,8 @@ export default function ServerInfoView({ guildId }: { guildId: string }) {
         RestAPI.get({ url: `/guilds/${guildId}` })
             .then((res: any) => {
                 if (!cancelled && res?.body?.owner_id) {
-                    setOwnerId(res.body.owner_id);
+                    const fetchedOwnerId = res.body.owner_id;
+                    setOwnerId(fetchedOwnerId);
                 }
             })
             .catch(() => {});
@@ -137,7 +135,7 @@ export default function ServerInfoView({ guildId }: { guildId: string }) {
         return () => { cancelled = true; };
     }, [guildId, ownerId]);
 
-    // Fetch Owner User Profile and Cache Result
+    // 2. Fetch Owner User Profile & Dispatch to Discord Store
     React.useEffect(() => {
         if (!ownerId) return;
 
@@ -146,51 +144,49 @@ export default function ServerInfoView({ guildId }: { guildId: string }) {
         if (storeUser?.username) {
             const name = storeUser.globalName ?? storeUser.username;
             setOwnerName(name);
-            if (storeUser.avatar) setOwnerAvatarHash(storeUser.avatar);
+            setOwnerAvatarHash(storeUser.avatar ?? null);
             ownerCache.set(guildId, { id: ownerId, name, avatar: storeUser.avatar ?? null });
             return;
         }
 
         let cancelled = false;
 
-        const handleUserData = (userData: any) => {
-            if (!userData || cancelled) return;
-            const name = userData.global_name ?? userData.globalName ?? userData.username;
-            const avatar = userData.avatar ?? null;
+        const processUser = (userObj: any) => {
+            if (!userObj || cancelled) return;
+            const name = userObj.global_name ?? userObj.globalName ?? userObj.username;
+            const avatar = userObj.avatar ?? null;
 
-            // Dispatch into Discord core store so it stays cached globally
+            // Dispatch into Discord core store so user is globally available
             Dispatcher?.dispatch({
                 type: "USER_UPDATE",
-                user: userData,
+                user: userObj,
             });
 
             setOwnerName(name);
             setOwnerAvatarHash(avatar);
             ownerCache.set(guildId, { id: ownerId, name, avatar });
+            forceUpdate();
         };
 
-        if (UserFetchModule?.fetchProfile) {
-            UserFetchModule.fetchProfile(ownerId, { guildId })
-                .then((res: any) => handleUserData(res?.user))
-                .catch(() => {});
-        } else if (RestAPI?.get) {
-            RestAPI.get({ url: `/users/${ownerId}` })
-                .then((res: any) => handleUserData(res?.body))
-                .catch(() => {});
-        }
+        // Always fallback to standard REST endpoint to guarantee single-pass cache
+        RestAPI.get({ url: `/users/${ownerId}` })
+            .then((res: any) => processUser(res?.body))
+            .catch(() => {});
 
         return () => { cancelled = true; };
     }, [ownerId, guildId]);
 
     if (!guild) return null;
 
-    // Direct CDN Asset URL Construction
+    // Fast CDN Asset URL Construction
+    const isAnimatedIcon = guild.icon?.startsWith("a_");
     const iconUrl = guild.icon 
-        ? `https://cdn.discordapp.com/icons/${guildId}/${guild.icon}.${guild.icon.startsWith("a_") ? "gif" : "png"}?size=256` 
+        ? `https://cdn.discordapp.com/icons/${guildId}/${guild.icon}.${isAnimatedIcon ? "gif" : "png"}?size=256` 
         : null;
 
+    const isAnimatedBanner = guild.banner?.startsWith("a_");
     const bannerUrl = guild.banner 
-        ? `https://cdn.discordapp.com/banners/${guildId}/${guild.banner}.${guild.banner.startsWith("a_") ? "gif" : "png"}?size=512` 
+        ? `https://cdn.discordapp.com/banners/${guildId}/${guild.banner}.${isAnimatedBanner ? "gif" : "png"}?size=512` 
         : null;
 
     const bio = guild.description ?? null;
@@ -209,13 +205,13 @@ export default function ServerInfoView({ guildId }: { guildId: string }) {
     const roleCount = GuildRoleStore?.getSortedRoles?.(guildId)?.length ?? null;
     const channelCount = GuildChannelStore?.getChannels ? Object.keys(GuildChannelStore.getChannels(guildId) ?? {}).length : null;
 
-    // Owner Avatar
+    // Owner Profile Details
     const ownerMember = ownerId ? GuildMemberStore?.getMember?.(guildId, ownerId) : null;
-    const finalOwnerName = ownerMember?.nick ?? ownerName ?? (ownerId ? `User (${ownerId.slice(0, 6)})` : "Unknown");
+    const finalOwnerName = ownerMember?.nick ?? ownerName ?? (ownerId ? `User (${ownerId.slice(0, 6)})` : "Loading...");
 
-    const avatarExt = ownerAvatarHash?.startsWith("a_") ? "gif" : "png";
+    const isAnimatedAvatar = ownerAvatarHash?.startsWith("a_");
     const ownerAvatarUri = ownerAvatarHash
-        ? `https://cdn.discordapp.com/avatars/${ownerId}/${ownerAvatarHash}.${avatarExt}?size=64`
+        ? `https://cdn.discordapp.com/avatars/${ownerId}/${ownerAvatarHash}.${isAnimatedAvatar ? "gif" : "png"}?size=64`
         : (ownerId ? `https://cdn.discordapp.com/embed/avatars/${Number((BigInt(ownerId) >> 22n) % 6n)}.png` : null);
 
     const boostLevel = guild.premiumTier ?? 0;
@@ -226,10 +222,21 @@ export default function ServerInfoView({ guildId }: { guildId: string }) {
         Number((BigInt(guildId) >> 22n) + 1420070400000n)
     ).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 
+    // Safe Non-Crashing Profile Handler
     const handleOwnerPress = () => {
         if (!ownerId) return;
-        hideActionSheet?.();
-        showUserProfile?.({ userId: ownerId, guildId });
+        try {
+            hideActionSheet?.();
+            if (ProfileModalModule?.openUserProfileModal) {
+                ProfileModalModule.openUserProfileModal({ userId: ownerId, guildId });
+            } else if (ProfileModalModule?.openUserProfile) {
+                ProfileModalModule.openUserProfile({ userId: ownerId, guildId });
+            } else if (ProfileModalModule?.showUserProfile) {
+                ProfileModalModule.showUserProfile({ userId: ownerId, guildId });
+            }
+        } catch (e) {
+            // Silently fallback if sheet action fails
+        }
     };
 
     const RowComponent = TableRow || FallbackRow;
