@@ -1,12 +1,16 @@
 import { React, ReactNative as RN } from "@vendetta/metro/common";
 import { findByProps, findByStoreName, findByName } from "@vendetta/metro";
 import { rawColors, semanticColors } from "@vendetta/ui";
-import { TableRow, TableRowGroup } from "@vendetta/ui/components";
 
-const ActionSheet = findByProps("ActionSheet")?.ActionSheet;
+// Safe UI component resolution
+const ActionSheet = findByProps("ActionSheet")?.ActionSheet ?? RN.View;
 const ASCBMod = findByProps("ActionSheetCloseButton");
 const ActionSheetCloseButton = ASCBMod?.ActionSheetCloseButton;
 const { hideActionSheet } = findByProps("openLazy", "hideActionSheet") ?? {};
+
+// Resolve TableRow and TableRowGroup with safe fallbacks
+const TableRow = findByProps("TableRow")?.TableRow ?? findByProps("FormRow")?.FormRow;
+const TableRowGroup = findByProps("TableRowGroup")?.TableRowGroup ?? findByProps("FormSection")?.FormSection;
 
 // Stores & Actions
 const GuildStore = findByStoreName("GuildStore");
@@ -14,7 +18,8 @@ const GuildMemberStore = findByStoreName("GuildMemberStore");
 const UserStore = findByStoreName("UserStore");
 const ThemeStore = findByStoreName("ThemeStore");
 
-const showUserProfile = findByName("showUserProfileActionSheet") 
+const showUserProfile = 
+    findByName("showUserProfileActionSheet", false) 
     ?? findByProps("openUserProfileModal")?.openUserProfileModal 
     ?? findByProps("showUserProfile")?.showUserProfile 
     ?? findByProps("openUserProfile")?.openUserProfile;
@@ -46,16 +51,44 @@ function T(p: any) {
     );
 }
 
+// Fallback Row component if native TableRow isn't found
+function FallbackRow({ label, subLabel, icon, onPress }: any) {
+    return (
+        <RN.TouchableOpacity
+            onPress={onPress}
+            disabled={!onPress}
+            style={{
+                flexDirection: "row",
+                alignItems: "center",
+                paddingVertical: 12,
+                paddingHorizontal: 16,
+                borderBottomWidth: 0.5,
+                borderBottomColor: sc("background-modifier-accent"),
+            }}
+        >
+            {icon && <RN.View style={{ marginRight: 12 }}>{icon}</RN.View>}
+            <RN.View style={{ flex: 1 }}>
+                <T variant="text-md/semibold">{label}</T>
+                {subLabel && (
+                    <T variant="text-sm/medium" style={{ color: sc("text-muted"), marginTop: 2 }}>
+                        {subLabel}
+                    </T>
+                )}
+            </RN.View>
+        </RN.TouchableOpacity>
+    );
+}
+
 export default function ServerInfoView({ guildId }: { guildId: string }) {
     const guild = GuildStore?.getGuild?.(guildId);
     if (!guild) return null;
 
-    // Fetch accurate member count
+    // Member count fallback
     const memberCount = guild.memberCount 
         ?? GuildMemberStore?.getMemberIds?.(guildId)?.length 
         ?? "Unknown";
 
-    // Fetch Owner Details
+    // Owner details
     const ownerId = guild.ownerId;
     const ownerMember = ownerId ? GuildMemberStore?.getMember?.(guildId, ownerId) : null;
     const ownerUser = ownerId ? UserStore?.getUser?.(ownerId) : null;
@@ -68,11 +101,11 @@ export default function ServerInfoView({ guildId }: { guildId: string }) {
     const ownerAvatar = ownerUser?.getAvatarURL?.(true, 64) 
         ?? (ownerId ? `https://cdn.discordapp.com/embed/avatars/${Number((BigInt(ownerId) >> 22n) % 6n)}.png` : null);
 
-    // Images
+    // Banner & Icon URLs
     const iconUrl = guild.getIconURL?.() ?? null;
     const bannerUrl = guild.getBannerURL?.() ?? null;
 
-    // Creation Date
+    // Creation date
     const createdDate = new Date(
         Number(BigInt(guildId) >> 22n) + 1420070400000
     ).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
@@ -83,9 +116,12 @@ export default function ServerInfoView({ guildId }: { guildId: string }) {
         showUserProfile?.({ userId: ownerId });
     };
 
+    const RowComponent = TableRow || FallbackRow;
+    const GroupContainer = TableRowGroup || RN.View;
+
     return (
         <ActionSheet>
-            {/* Header / Navigation bar */}
+            {/* Action Sheet Header */}
             <RN.View style={{ flexDirection: "row", alignItems: "center", paddingVertical: 12, paddingHorizontal: 16 }}>
                 <T variant="heading-md/bold" style={{ flex: 1 }}>Server Information</T>
                 {ActionSheetCloseButton ? (
@@ -98,7 +134,7 @@ export default function ServerInfoView({ guildId }: { guildId: string }) {
             </RN.View>
 
             <RN.ScrollView style={{ flex: 1 }}>
-                {/* Banner & Icon Header Visual */}
+                {/* Banner & Server Icon */}
                 <RN.View style={{ alignItems: "center", marginBottom: 16 }}>
                     <RN.View style={{ width: "100%", height: 100, backgroundColor: sc("background-tertiary") }}>
                         {bannerUrl && (
@@ -143,11 +179,11 @@ export default function ServerInfoView({ guildId }: { guildId: string }) {
                     </RN.View>
                 </RN.View>
 
-                {/* Information Sections via TableRows */}
+                {/* Details Section */}
                 <RN.View style={{ paddingHorizontal: 16, paddingBottom: 24 }}>
-                    <TableRowGroup title="SERVER OVERVIEW">
+                    <GroupContainer title="SERVER OVERVIEW">
                         {ownerId && (
-                            <TableRow
+                            <RowComponent
                                 label="Owner"
                                 subLabel={ownerName}
                                 icon={
@@ -162,19 +198,19 @@ export default function ServerInfoView({ guildId }: { guildId: string }) {
                                 arrow
                             />
                         )}
-                        <TableRow
+                        <RowComponent
                             label="Members"
                             subLabel={String(memberCount)}
                         />
-                        <TableRow
+                        <RowComponent
                             label="Created On"
                             subLabel={createdDate}
                         />
-                        <TableRow
+                        <RowComponent
                             label="Server ID"
                             subLabel={guildId}
                         />
-                    </TableRowGroup>
+                    </GroupContainer>
                 </RN.View>
             </RN.ScrollView>
         </ActionSheet>
