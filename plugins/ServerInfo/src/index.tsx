@@ -1,15 +1,14 @@
-import { find, findByStoreName } from "@vendetta/metro";
+import { find, findByProps } from "@vendetta/metro";
 import { after } from "@vendetta/patcher";
-import { showSimpleActionSheet } from "@vendetta/ui/actionSheets";
+import ServerInfoView from "./components/ServerInfoView";
+
+const { openLazy } = findByProps("openLazy") ?? {};
 
 let unpatch: (() => void) | undefined;
 
 function patchGuildMenu(): () => void {
-    // Locate the exact menu builder function Discord mobile uses
     const mod = find((m: any) => m?.default?.name === "getGuildsBarGuildMenuItems");
-    if (!mod?.default) return () => {};
-
-    const GuildStore = findByStoreName("GuildStore");
+    if (!mod?.default || !openLazy) return () => {};
 
     return after("default", mod, (args: any[], ret: any) => {
         const guildId = args?.[0];
@@ -20,32 +19,14 @@ function patchGuildMenu(): () => void {
         const serverInfoItem = {
             label: "Server Info",
             action: () => {
-                const targetGuild = GuildStore?.getGuild?.(id);
-                const memberCount = targetGuild?.memberCount ?? "Unknown";
-                const ownerId = targetGuild?.ownerId ?? "Unknown";
-
-                // Snowflake creation timestamp
-                const createdDate = new Date(
-                    Number(BigInt(id) >> 22n) + 1420070400000
-                ).toLocaleDateString();
-
-                showSimpleActionSheet({
-                    key: "ServerInfoActionSheet",
-                    header: {
-                        title: targetGuild?.name ?? "Server Info",
-                        subtitle: `ID: ${id}`,
-                        icon: targetGuild?.getIconURL?.(),
-                    },
-                    options: [
-                        { label: `Members: ${memberCount}`, isSecondary: true },
-                        { label: `Created: ${createdDate}`, isSecondary: true },
-                        { label: `Owner ID: ${ownerId}`, isSecondary: true },
-                    ],
-                });
+                openLazy(
+                    Promise.resolve({ default: ServerInfoView }),
+                    "server-info-actionsheet-" + id,
+                    { guildId: id }
+                );
             },
         };
 
-        // Append our custom button object to the menu array
         return [...ret, serverInfoItem];
     });
 }
@@ -62,7 +43,7 @@ export default {
         try {
             unpatch?.();
         } catch {
-            /* ignore cleanup error */
+            /* ignore */
         }
         unpatch = undefined;
     },
