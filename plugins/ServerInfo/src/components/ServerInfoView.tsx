@@ -1,12 +1,13 @@
 import { React, ReactNative as RN } from "@vendetta/metro/common";
-import { findByProps, findByStoreName, findByName } from "@vendetta/metro";
+import { findByProps, findByStoreName } from "@vendetta/metro";
 import { rawColors, semanticColors } from "@vendetta/ui";
+import { getGuildFriends } from "../index";
 
 // UI & ActionSheet Setup
 const ActionSheet = findByProps("ActionSheet")?.ActionSheet ?? RN.View;
 const ASCBMod = findByProps("ActionSheetCloseButton");
 const ActionSheetCloseButton = ASCBMod?.ActionSheetCloseButton;
-const { hideActionSheet } = findByProps("openLazy", "hideActionSheet") ?? {};
+const { openLazy, hideActionSheet } = findByProps("openLazy", "hideActionSheet") ?? {};
 
 // Table UI components
 const TableRow = findByProps("TableRow")?.TableRow ?? findByProps("FormRow")?.FormRow;
@@ -26,7 +27,7 @@ const HeaderCountsStore = findByStoreName("GuildHeaderCountsStore") ?? MemberCou
 // Network & API Modules
 const RestAPI = findByProps("get", "post", "del", "patch");
 
-// Profile Opener (Safely fallback through known Discord profile handlers)
+// Profile Opener
 const ProfileModalModule = findByProps("openUserProfileModal", "openUserProfile") ?? findByProps("showUserProfile");
 
 const TextStyleSheet = findByProps("TextStyleSheet")?.TextStyleSheet;
@@ -35,6 +36,13 @@ const colorResolver = colorModule?.internal ?? colorModule?.meta;
 
 // --- IN-MEMORY GUILD OWNER CACHE ---
 const ownerCache = new Map<string, { id: string; name: string; avatar: string | null }>();
+
+interface Friend {
+    id: string;
+    username: string;
+    globalName: string | null;
+    nick: string | null;
+}
 
 function sc(key: string): string {
     const t = ThemeStore?.theme ?? "dark";
@@ -86,8 +94,85 @@ function FallbackRow({ label, subLabel, icon, onPress }: any) {
     );
 }
 
+// Nested Friends List ActionSheet View
+function ServerFriendsSheet({ friends, guildId }: { friends: Friend[]; guildId: string }) {
+    const RowComponent = TableRow || FallbackRow;
+
+    const handleFriendPress = (userId: string) => {
+        try {
+            hideActionSheet?.();
+            if (ProfileModalModule?.openUserProfileModal) {
+                ProfileModalModule.openUserProfileModal({ userId, guildId });
+            } else if (ProfileModalModule?.openUserProfile) {
+                ProfileModalModule.openUserProfile({ userId, guildId });
+            } else if (ProfileModalModule?.showUserProfile) {
+                ProfileModalModule.showUserProfile({ userId, guildId });
+            }
+        } catch {}
+    };
+
+    return (
+        <ActionSheet>
+            <RN.View style={{ flexDirection: "row", alignItems: "center", paddingVertical: 12, paddingHorizontal: 16 }}>
+                <T variant="heading-md/bold" style={{ flex: 1 }}>
+                    Friends in Server ({friends.length})
+                </T>
+                {ActionSheetCloseButton ? (
+                    <ActionSheetCloseButton onPress={() => hideActionSheet?.()} />
+                ) : (
+                    <T variant="text-md/semibold" style={{ color: rawColors.BRAND_500 }} onPress={() => hideActionSheet?.()}>
+                        Close
+                    </T>
+                )}
+            </RN.View>
+
+            <RN.ScrollView style={{ flex: 1, paddingHorizontal: 16, paddingBottom: 24 }}>
+                {friends.length === 0 ? (
+                    <RN.View style={{ paddingVertical: 20, alignItems: "center" }}>
+                        <T variant="text-md/medium" style={{ color: sc("text-muted") }}>
+                            No friends found in this server.
+                        </T>
+                    </RN.View>
+                ) : (
+                    friends.map((friend) => {
+                        const displayName = friend.nick || friend.globalName || friend.username;
+                        const handle = friend.username ? `@${friend.username}` : "";
+                        const subLabel = handle && handle !== `@${displayName}` ? handle : undefined;
+
+                        const isAnimated = UserStore?.getUser?.(friend.id)?.avatar?.startsWith("a_");
+                        const avatarHash = UserStore?.getUser?.(friend.id)?.avatar;
+                        const avatarUri = avatarHash
+                            ? `https://cdn.discordapp.com/avatars/${friend.id}/${avatarHash}.${isAnimated ? "gif" : "png"}?size=64`
+                            : `https://cdn.discordapp.com/embed/avatars/${Number((BigInt(friend.id) >> 22n) % 6n)}.png`;
+
+                        return (
+                            <RowComponent
+                                key={friend.id}
+                                label={displayName}
+                                subLabel={subLabel}
+                                icon={
+                                    <RN.Image
+                                        source={{ uri: avatarUri }}
+                                        style={{ width: 28, height: 28, borderRadius: 14 }}
+                                    />
+                                }
+                                onPress={() => handleFriendPress(friend.id)}
+                                arrow
+                            />
+                        );
+                    })
+                )}
+            </RN.ScrollView>
+        </ActionSheet>
+    );
+}
+
 export default function ServerInfoView({ guildId }: { guildId: string }) {
     const [, forceUpdate] = React.useReducer((x) => x + 1, 0);
+
+    // Friends state management
+    const [friends, setFriends] = React.useState<Friend[]>([]);
+    const [friendsLoading, setFriendsLoading] = React.useState<boolean>(true);
 
     // Live store subscriptions
     React.useEffect(() => {
@@ -110,8 +195,29 @@ export default function ServerInfoView({ guildId }: { guildId: string }) {
         };
     }, []);
 
+    // Fetch Friends in Guild using Gateway request
+    React.useEffect(() => {
+        let isMounted = true;
+        setFriendsLoading(true);
+
+        getGuildFriends(guildId)
+            .then((res: Friend[]) => {
+                if (isMounted) {
+                    setFriends(res);
+                    setFriendsLoading(false);
+                }
+            })
+            .catch(() => {
+                if (isMounted) setFriendsLoading(false);
+            });
+
+        return () => {
+            isMounted = false;
+        };
+    }, [guildId]);
+
     const guild = GuildStore?.getGuild?.(guildId);
-    
+
     // Cached owner state initialization
     const cachedOwner = ownerCache.get(guildId);
     const [ownerId, setOwnerId] = React.useState<string | null>(guild?.ownerId ?? cachedOwner?.id ?? null);
@@ -139,7 +245,6 @@ export default function ServerInfoView({ guildId }: { guildId: string }) {
     React.useEffect(() => {
         if (!ownerId) return;
 
-        // Check if user exists in standard UserStore
         const storeUser = UserStore?.getUser?.(ownerId);
         if (storeUser?.username) {
             const name = storeUser.globalName ?? storeUser.username;
@@ -156,7 +261,6 @@ export default function ServerInfoView({ guildId }: { guildId: string }) {
             const name = userObj.global_name ?? userObj.globalName ?? userObj.username;
             const avatar = userObj.avatar ?? null;
 
-            // Dispatch into Discord core store so user is globally available
             Dispatcher?.dispatch({
                 type: "USER_UPDATE",
                 user: userObj,
@@ -168,7 +272,6 @@ export default function ServerInfoView({ guildId }: { guildId: string }) {
             forceUpdate();
         };
 
-        // Always fallback to standard REST endpoint to guarantee single-pass cache
         RestAPI.get({ url: `/users/${ownerId}` })
             .then((res: any) => processUser(res?.body))
             .catch(() => {});
@@ -222,7 +325,6 @@ export default function ServerInfoView({ guildId }: { guildId: string }) {
         Number((BigInt(guildId) >> 22n) + 1420070400000n)
     ).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 
-    // Safe Non-Crashing Profile Handler
     const handleOwnerPress = () => {
         if (!ownerId) return;
         try {
@@ -234,9 +336,18 @@ export default function ServerInfoView({ guildId }: { guildId: string }) {
             } else if (ProfileModalModule?.showUserProfile) {
                 ProfileModalModule.showUserProfile({ userId: ownerId, guildId });
             }
-        } catch (e) {
-            // Silently fallback if sheet action fails
-        }
+        } catch (e) {}
+    };
+
+    const openFriendsSheet = () => {
+        if (!openLazy || friendsLoading) return;
+        openLazy(
+            Promise.resolve({
+                default: () => <ServerFriendsSheet friends={friends} guildId={guildId} />,
+            }),
+            "server-friends-actionsheet-" + guildId,
+            {}
+        );
     };
 
     const RowComponent = TableRow || FallbackRow;
@@ -298,8 +409,7 @@ export default function ServerInfoView({ guildId }: { guildId: string }) {
                         <T variant="heading-lg/bold" style={{ marginTop: 8, textAlign: "center" }}>
                             {guild.name}
                         </T>
-                        
-                        {/* Server Bio / Description */}
+
                         {bio && (
                             <T variant="text-sm/medium" style={{ color: sc("text-muted"), textAlign: "center", marginTop: 4 }}>
                                 {bio}
@@ -313,6 +423,19 @@ export default function ServerInfoView({ guildId }: { guildId: string }) {
                     <GroupContainer title="OVERVIEW">
                         <RowComponent label="Members" subLabel={String(memberCount)} />
                         {onlineCount && <RowComponent label="Online" subLabel={String(onlineCount)} />}
+                        
+                        {/* Friends Row */}
+                        <RowComponent
+                            label="Friends in Server"
+                            subLabel={
+                                friendsLoading
+                                    ? "Loading..."
+                                    : `${friends.length} friend${friends.length === 1 ? "" : "s"}`
+                            }
+                            onPress={friendsLoading ? undefined : openFriendsSheet}
+                            arrow={!friendsLoading}
+                        />
+
                         {roleCount !== null && <RowComponent label="Roles" subLabel={String(roleCount)} />}
                         {channelCount !== null && <RowComponent label="Channels" subLabel={String(channelCount)} />}
                         <RowComponent label="Boost Status" subLabel={`Level ${boostLevel} (${boostCount} Boosts)`} />
