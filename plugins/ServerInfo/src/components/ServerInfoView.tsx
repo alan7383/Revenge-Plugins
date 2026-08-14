@@ -12,12 +12,15 @@ const { hideActionSheet } = findByProps("openLazy", "hideActionSheet") ?? {};
 const TableRow = findByProps("TableRow")?.TableRow ?? findByProps("FormRow")?.FormRow;
 const TableRowGroup = findByProps("TableRowGroup")?.TableRowGroup ?? findByProps("FormSection")?.FormSection;
 
-// Stores & Actions
+// Stores & Modules
 const GuildStore = findByStoreName("GuildStore");
 const GuildMemberStore = findByStoreName("GuildMemberStore");
 const UserStore = findByStoreName("UserStore");
 const ThemeStore = findByStoreName("ThemeStore");
+const MemberCountStore = findByProps("getMemberCount", "getOnlineCount");
 
+// Profile / User fetchers
+const UserFetchModule = findByProps("fetchProfile", "getUser") ?? findByProps("fetchProfile");
 const showUserProfile = 
     findByName("showUserProfileActionSheet", false) 
     ?? findByProps("openUserProfileModal")?.openUserProfileModal 
@@ -51,7 +54,6 @@ function T(p: any) {
     );
 }
 
-// Fallback Row component if native TableRow isn't found
 function FallbackRow({ label, subLabel, icon, onPress }: any) {
     return (
         <RN.TouchableOpacity
@@ -83,27 +85,57 @@ export default function ServerInfoView({ guildId }: { guildId: string }) {
     const guild = GuildStore?.getGuild?.(guildId);
     if (!guild) return null;
 
-    // Member count fallback
-    const memberCount = guild.memberCount 
-        ?? GuildMemberStore?.getMemberIds?.(guildId)?.length 
-        ?? "Unknown";
-
-    // Owner details
+    // Async owner state
     const ownerId = guild.ownerId;
-    const ownerMember = ownerId ? GuildMemberStore?.getMember?.(guildId, ownerId) : null;
-    const ownerUser = ownerId ? UserStore?.getUser?.(ownerId) : null;
+    const [fetchedOwner, setFetchedOwner] = React.useState<any>(() => 
+        ownerId ? UserStore?.getUser?.(ownerId) : null
+    );
 
+    // Fetch owner if not cached
+    React.useEffect(() => {
+        if (!ownerId || fetchedOwner?.username) return;
+
+        let isMounted = true;
+        if (UserFetchModule?.fetchProfile) {
+            UserFetchModule.fetchProfile(ownerId, { guildId })
+                .then((res: any) => {
+                    if (isMounted && res?.user) setFetchedOwner(res.user);
+                })
+                .catch(() => {});
+        }
+        return () => { isMounted = false; };
+    }, [ownerId, guildId]);
+
+    // Member count parsing
+    const rawMemberCount = 
+        MemberCountStore?.getMemberCount?.(guildId) 
+        ?? guild.memberCount 
+        ?? guild.approximateMemberCount 
+        ?? GuildMemberStore?.getMemberIds?.(guildId)?.length;
+
+    const memberCount = typeof rawMemberCount === "number" 
+        ? rawMemberCount.toLocaleString() 
+        : (rawMemberCount ?? "Unknown");
+
+    // Owner display details
+    const ownerMember = ownerId ? GuildMemberStore?.getMember?.(guildId, ownerId) : null;
     const ownerName = ownerMember?.nick 
-        ?? ownerUser?.globalName 
-        ?? ownerUser?.username 
+        ?? fetchedOwner?.globalName 
+        ?? fetchedOwner?.username 
+        ?? (fetchedOwner?.discriminator && fetchedOwner.discriminator !== "0" ? `${fetchedOwner.username}#${fetchedOwner.discriminator}` : null)
         ?? (ownerId ? `User (${ownerId.slice(0, 6)})` : "Unknown");
 
-    const ownerAvatar = ownerUser?.getAvatarURL?.(true, 64) 
+    const ownerAvatar = fetchedOwner?.getAvatarURL?.(true, 64) 
         ?? (ownerId ? `https://cdn.discordapp.com/embed/avatars/${Number((BigInt(ownerId) >> 22n) % 6n)}.png` : null);
 
     // Banner & Icon URLs
     const iconUrl = guild.getIconURL?.() ?? null;
     const bannerUrl = guild.getBannerURL?.() ?? null;
+
+    // Boost & Vanity Info
+    const boostLevel = guild.premiumTier ?? 0;
+    const boostCount = guild.premiumSubscriberCount ?? 0;
+    const vanityCode = guild.vanityURLCode ? `discord.gg/${guild.vanityURLCode}` : null;
 
     // Creation date
     const createdDate = new Date(
@@ -179,7 +211,7 @@ export default function ServerInfoView({ guildId }: { guildId: string }) {
                     </RN.View>
                 </RN.View>
 
-                {/* Details Section */}
+                {/* Server Overview Group */}
                 <RN.View style={{ paddingHorizontal: 16, paddingBottom: 24 }}>
                     <GroupContainer title="SERVER OVERVIEW">
                         {ownerId && (
@@ -202,6 +234,16 @@ export default function ServerInfoView({ guildId }: { guildId: string }) {
                             label="Members"
                             subLabel={String(memberCount)}
                         />
+                        <RowComponent
+                            label="Boost Status"
+                            subLabel={`Level ${boostLevel} (${boostCount} Boosts)`}
+                        />
+                        {vanityCode && (
+                            <RowComponent
+                                label="Vanity URL"
+                                subLabel={vanityCode}
+                            />
+                        )}
                         <RowComponent
                             label="Created On"
                             subLabel={createdDate}
