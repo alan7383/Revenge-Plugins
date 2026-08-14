@@ -1,6 +1,6 @@
 import { React, ReactNative, NavigationNative } from "@vendetta/metro/common";
 import { findByProps, findByDisplayName, findByName } from "@vendetta/metro";
-import { getNotifications, subscribeToNotifications } from "../notifications";
+import { getNotifications, subscribeToNotifications, clearNotifications } from "../notifications";
 import type { MentionSubCategory, NotificationCategory, NotificationItem } from "../types";
 
 const { View, Text, TouchableOpacity, ScrollView, Image, StyleSheet } = ReactNative;
@@ -86,16 +86,21 @@ export default function NotificationCenterUI(): JSX.Element {
   const notifications = getNotifications();
 
   const displayedNotifications = useMemo(() => {
-    return notifications
-      .filter((n) => {
-        if (currentCategory === "mentions") {
-          if (n.category !== "mentions") return false;
-          if (currentMentionFilter === "all") return true;
-          return n.subCategory === currentMentionFilter;
-        }
-        return n.category === currentCategory;
-      })
-      .slice(0, 30);
+    const filtered = notifications.filter((n) => {
+      if (currentCategory === "mentions") {
+        if (n.category !== "mentions") return false;
+        if (currentMentionFilter === "all") return true;
+        return n.subCategory === currentMentionFilter;
+      }
+      return n.category === currentCategory;
+    });
+
+    // Limit to 30 ONLY if viewing the Bot subcategory
+    if (currentCategory === "mentions" && currentMentionFilter === "bot") {
+      return filtered.slice(0, 30);
+    }
+
+    return filtered;
   }, [notifications, currentCategory, currentMentionFilter]);
 
   const jumpToMessage = useCallback((guildId?: string, channelId?: string, messageId?: string) => {
@@ -113,6 +118,16 @@ export default function NotificationCenterUI(): JSX.Element {
 
   return (
     <View style={styles.container}>
+      <View style={styles.headerBar}>
+        <Text style={styles.headerTitle}>Inbox Notifications</Text>
+        <TouchableOpacity 
+          style={styles.clearButton} 
+          onPress={() => clearNotifications(currentCategory)}
+        >
+          <Text style={styles.clearButtonText}>Clear Category</Text>
+        </TouchableOpacity>
+      </View>
+
       {NativeTabs && tabsState ? (
         <NativeTabs
           state={{
@@ -175,7 +190,7 @@ export default function NotificationCenterUI(): JSX.Element {
         {displayedNotifications.length === 0 ? (
           <Text style={styles.emptyText}>No notifications found for this category.</Text>
         ) : (
-          <TableRowGroup title={`RECENT ${categoryLabel(currentCategory).toUpperCase()}`}>
+          <TableRowGroup title={`RECENT ${categoryLabel(currentCategory).toUpperCase()} (${displayedNotifications.length})`}>
             {displayedNotifications.map((item) => (
               <NotificationRow
                 key={item.id}
@@ -192,6 +207,17 @@ export default function NotificationCenterUI(): JSX.Element {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#313338" },
+  headerBar: { 
+    flexDirection: "row", 
+    justifyContent: "space-between", 
+    alignItems: "center", 
+    paddingHorizontal: 16, 
+    paddingVertical: 10, 
+    backgroundColor: "#1e1f22" 
+  },
+  headerTitle: { color: "#ffffff", fontWeight: "bold", fontSize: 16 },
+  clearButton: { backgroundColor: "#da373c", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6 },
+  clearButtonText: { color: "#ffffff", fontWeight: "600", fontSize: 12 },
   subFilterWrapper: { paddingHorizontal: 12, paddingVertical: 8, backgroundColor: "#1e1f22" },
   tabBar: { flexDirection: "row", backgroundColor: "#2b2d31", paddingVertical: 4 },
   tabButton: { flex: 1, paddingVertical: 10, alignItems: "center" },
