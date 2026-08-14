@@ -22,8 +22,9 @@ let saveTimeout: any = null;
 function syncStorageDebounced() {
   if (saveTimeout) clearTimeout(saveTimeout);
   saveTimeout = setTimeout(() => {
-    storage.notifications = memoryNotifications.slice(0, 100);
-  }, 2500);
+    // Save up to 500 total stored notifications
+    storage.notifications = memoryNotifications.slice(0, 500);
+  }, 1000);
 }
 
 export function subscribeToNotifications(listener: () => void): () => void {
@@ -35,10 +36,26 @@ export function getNotifications(): NotificationItem[] {
   return memoryNotifications;
 }
 
+export function clearNotifications(category?: string) {
+  if (!category) {
+    memoryNotifications = [];
+  } else {
+    memoryNotifications = memoryNotifications.filter((n) => n.category !== category);
+  }
+  syncStorageDebounced();
+  listeners.forEach((l) => l());
+}
+
+export function deleteNotification(id: string) {
+  memoryNotifications = memoryNotifications.filter((n) => n.id !== id);
+  syncStorageDebounced();
+  listeners.forEach((l) => l());
+}
+
 function pushNotification(item: NotificationItem) {
   if (memoryNotifications.some((n) => n.id === item.id)) return;
 
-  memoryNotifications = [item, ...memoryNotifications].slice(0, 100);
+  memoryNotifications = [item, ...memoryNotifications].slice(0, 500);
   syncStorageDebounced();
   listeners.forEach((l) => l());
 }
@@ -311,7 +328,7 @@ export function setInboxTracking(enabled: boolean) {
     FluxDispatcher.unsubscribe("PRESENCE_UPDATES", handlePresenceUpdates);
 
     if (saveTimeout) clearTimeout(saveTimeout);
-    storage.notifications = memoryNotifications.slice(0, 100);
+    storage.notifications = memoryNotifications.slice(0, 500);
     lastActivitySignature.clear();
   }
 }
