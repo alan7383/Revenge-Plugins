@@ -3,16 +3,15 @@ import Settings from "./Settings";
 
 const React = (window as any).React || metro.findByProps("createElement", "useState");
 
-const { View, Text, ScrollView, TouchableOpacity, TextInput } = 
+const { View, Text, ScrollView, TouchableOpacity, TextInput } =
   metro.findByProps("ScrollView", "TextInput") || metro.findByProps("View", "Text") || {};
 
-// Find sheet controllers across different client variations
-const BottomSheet = 
-  metro.findByProps("openLazy", "hideActionSheet") || 
-  metro.findByProps("openBottomSheet") || 
-  metro.findByProps("dismiss", "open");
-
-const ActionSheet = metro.findByProps("hideActionSheet") || metro.findByProps("dismissActionSheet");
+// Navigation and Screen wrappers
+const Navigation = metro.findByProps("push", "pushLazy", "pop");
+const Navigator = metro.findByName("Navigator") ?? metro.findByProps("Navigator")?.Navigator;
+const modalCloseButton =
+  metro.findByProps("getRenderCloseButton")?.getRenderCloseButton ??
+  metro.findByProps("getHeaderCloseButton")?.getHeaderCloseButton;
 
 interface ModuleMatch {
   id: string;
@@ -20,201 +19,180 @@ interface ModuleMatch {
   exports: any;
 }
 
-/**
- * Universal sheet dismissal handler
- */
-function dismissSheet(props?: any): void {
-  try {
-    if (typeof props?.close === "function") {
-      props.close();
-      return;
+function MetroInspectorUI(): React.JSX.Element {
+  const modules = metro.modules || (window as any).modules || {};
+  const [query, setQuery] = React.useState("");
+  const [selectedId, setSelectedId] = React.useState<string | null>(null);
+
+  const matches = React.useMemo(() => {
+    if (!query || query.length < 2) return [];
+
+    const list: ModuleMatch[] = [];
+    const q = query.toLowerCase();
+
+    for (const [id, mod] of Object.entries<any>(modules)) {
+      if (list.length >= 50) break; // Expanded list threshold
+
+      const exports = mod?.publicModule?.exports || mod?.exports;
+      if (!exports) continue;
+
+      try {
+        const keys = Object.keys(exports);
+        const keysStr = keys.join(", ");
+
+        if (keysStr.toLowerCase().includes(q) || id === query) {
+          list.push({ id, keys, exports });
+        }
+      } catch (e) {}
     }
-    if (typeof props?.onClose === "function") {
-      props.onClose();
-      return;
+    return list;
+  }, [query]);
+
+  const activeDetail = React.useMemo(() => {
+    if (!selectedId) return null;
+    const mod = modules[selectedId];
+    const exp = mod?.publicModule?.exports || mod?.exports;
+    if (!exp) return "No exports available";
+
+    try {
+      const fullKeys = Object.keys(exp);
+      const formatted = fullKeys
+        .map((k) => ` • ${k}: <${typeof exp[k]}>`)
+        .join("\n");
+
+      return `Module ID: ${selectedId}\nTotal Keys: ${fullKeys.length}\n\nKeys & Types:\n${formatted}`;
+    } catch (e: any) {
+      return `Error inspecting module: ${e.message}`;
     }
-    if (BottomSheet?.hideActionSheet) {
-      BottomSheet.hideActionSheet();
-      return;
-    }
-    if (ActionSheet?.hideActionSheet) {
-      ActionSheet.hideActionSheet();
-      return;
-    }
-    if (ActionSheet?.dismissActionSheet) {
-      ActionSheet.dismissActionSheet();
-      return;
-    }
-    if (BottomSheet?.dismiss) {
-      BottomSheet.dismiss();
-      return;
-    }
-  } catch (err) {
-    console.error("[MetroInspector] Failed to close sheet:", err);
-  }
+  }, [selectedId]);
+
+  return (
+    <View style={{ flex: 1, backgroundColor: "#1e1f22", padding: 16 }}>
+      {/* Header Info */}
+      <Text style={{ color: "#5865F2", fontSize: 22, fontWeight: "bold" }}>
+        ⚡ Metro Explorer
+      </Text>
+      <Text style={{ color: "#949BA4", fontSize: 13, marginBottom: 12 }}>
+        Loaded Modules: {Object.keys(modules).length}
+      </Text>
+
+      {/* Search Bar */}
+      {TextInput && (
+        <TextInput
+          style={{
+            backgroundColor: "#2b2d31",
+            color: "#FFFFFF",
+            padding: 12,
+            borderRadius: 8,
+            marginBottom: 12,
+            fontSize: 14,
+          }}
+          placeholder="Search export key or module ID..."
+          placeholderTextColor="#949BA4"
+          value={query}
+          onChangeText={(text: string) => {
+            setQuery(text);
+            setSelectedId(null);
+          }}
+          autoCapitalize="none"
+        />
+      )}
+
+      {/* Main Expanded Viewport */}
+      {selectedId ? (
+        <View style={{ flex: 1, backgroundColor: "#111214", borderRadius: 8, padding: 12 }}>
+          <TouchableOpacity
+            style={{
+              alignSelf: "flex-start",
+              paddingVertical: 6,
+              paddingHorizontal: 10,
+              backgroundColor: "#2b2d31",
+              borderRadius: 6,
+              marginBottom: 10,
+            }}
+            onPress={() => setSelectedId(null)}
+          >
+            <Text style={{ color: "#5865F2", fontWeight: "bold" }}>← Back to List</Text>
+          </TouchableOpacity>
+
+          <ScrollView style={{ flex: 1 }}>
+            <Text
+              selectable
+              style={{
+                color: "#23a55a",
+                fontFamily: "monospace",
+                fontSize: 12,
+                lineHeight: 18,
+              }}
+            >
+              {activeDetail}
+            </Text>
+          </ScrollView>
+        </View>
+      ) : (
+        <ScrollView style={{ flex: 1, backgroundColor: "#2b2d31", borderRadius: 8, padding: 8 }}>
+          {matches.length > 0 ? (
+            matches.map((item) => (
+              <TouchableOpacity
+                key={item.id}
+                style={{
+                  paddingVertical: 10,
+                  paddingHorizontal: 8,
+                  borderBottomWidth: 1,
+                  borderBottomColor: "#35363c",
+                }}
+                onPress={() => setSelectedId(item.id)}
+              >
+                <Text style={{ color: "#5865F2", fontWeight: "bold", fontSize: 14 }}>
+                  [ID {item.id}] ({item.keys.length} keys)
+                </Text>
+                <Text
+                  selectable
+                  numberOfLines: 3
+                  style={{
+                    color: "#DBDEE1",
+                    fontFamily: "monospace",
+                    fontSize: 11,
+                    marginTop: 4,
+                  }}
+                >
+                  {item.keys.join(", ")}
+                </Text>
+              </TouchableOpacity>
+            ))
+          ) : (
+            <Text style={{ color: "#949BA4", fontSize: 13, padding: 12 }}>
+              {query.length < 2
+                ? "Type at least 2 characters to search exports..."
+                : "No matching modules found."}
+            </Text>
+          )}
+        </ScrollView>
+      )}
+    </View>
+  );
 }
 
 export function openMetroExplorer(): void {
-  if (!BottomSheet?.openLazy) return;
+  if (!Navigation?.push || !Navigator) return;
 
-  const modules = metro.modules || (window as any).modules || {};
-
-  BottomSheet.openLazy(
-    Promise.resolve({
-      default: (props: { close?: () => void; onClose?: () => void }) => {
-        const [query, setQuery] = React.useState("");
-        const [selectedId, setSelectedId] = React.useState<string | null>(null);
-
-        const matches = React.useMemo(() => {
-          if (!query || query.length < 2) return [];
-
-          const list: ModuleMatch[] = [];
-          const q = query.toLowerCase();
-
-          for (const [id, mod] of Object.entries<any>(modules)) {
-            if (list.length >= 25) break;
-
-            const exports = mod?.publicModule?.exports || mod?.exports;
-            if (!exports) continue;
-
-            try {
-              const keys = Object.keys(exports);
-              const keysStr = keys.join(", ");
-
-              if (keysStr.toLowerCase().includes(q) || id === query) {
-                list.push({ id, keys, exports });
-              }
-            } catch (e) {}
-          }
-          return list;
-        }, [query]);
-
-        const activeDetail = React.useMemo(() => {
-          if (!selectedId) return null;
-          const mod = modules[selectedId];
-          const exp = mod?.publicModule?.exports || mod?.exports;
-          if (!exp) return "No exports available";
-
-          try {
-            const fullKeys = Object.keys(exp);
-            const formatted = fullKeys
-              .map((k) => ` • ${k}: <${typeof exp[k]}>`)
-              .join("\n");
-
-            return `Module ID: ${selectedId}\nTotal Keys: ${fullKeys.length}\n\nKeys & Types:\n${formatted}`;
-          } catch (e: any) {
-            return `Error inspecting module: ${e.message}`;
-          }
-        }, [selectedId]);
-
-        return React.createElement(
-          View,
-          { style: { backgroundColor: "#1e1f22", padding: 18, flex: 1, minHeight: 520 } },
-          
-          // Header
-          React.createElement(
-            Text,
-            { style: { color: "#5865F2", fontSize: 20, fontWeight: "bold", marginBottom: 2 } },
-            "⚡ Metro Explorer"
-          ),
-          React.createElement(
-            Text,
-            { style: { color: "#949BA4", fontSize: 12, marginBottom: 10 } },
-            `Loaded Modules: ${Object.keys(modules).length}`
-          ),
-
-          // Search Input
-          TextInput &&
-            React.createElement(TextInput, {
-              style: { backgroundColor: "#2b2d31", color: "#FFFFFF", padding: 10, borderRadius: 8, marginBottom: 10 },
-              placeholder: "Search function name or module ID...",
-              placeholderTextColor: "#949BA4",
-              value: query,
-              onChangeText: (text: string) => {
-                setQuery(text);
-                setSelectedId(null);
-              },
-              autoCapitalize: "none"
-            }),
-
-          // Content Area
-          selectedId
-            ? React.createElement(
-                View,
-                { style: { flex: 1, backgroundColor: "#111214", padding: 10, borderRadius: 8, maxHeight: 320 } },
-                React.createElement(
-                  TouchableOpacity,
-                  {
-                    style: { alignSelf: "flex-end", padding: 4, marginBottom: 4 },
-                    onPress: () => setSelectedId(null)
-                  },
-                  React.createElement(Text, { style: { color: "#5865F2", fontWeight: "bold" } }, "← Back to List")
-                ),
-                React.createElement(
-                  ScrollView,
-                  { style: { flex: 1 } },
-                  React.createElement(
-                    Text,
-                    { selectable: true, style: { color: "#23a55a", fontFamily: "monospace", fontSize: 11, lineHeight: 16 } },
-                    activeDetail
-                  )
-                )
-              )
-            : React.createElement(
-                ScrollView,
-                { style: { flex: 1, backgroundColor: "#2b2d31", padding: 8, borderRadius: 8, maxHeight: 320 } },
-                matches.length > 0
-                  ? matches.map((item) =>
-                      React.createElement(
-                        TouchableOpacity,
-                        {
-                          key: item.id,
-                          style: { paddingVertical: 6, paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: "#35363c" },
-                          onPress: () => setSelectedId(item.id)
-                        },
-                        React.createElement(
-                          Text,
-                          { style: { color: "#5865F2", fontWeight: "bold", fontSize: 12 } },
-                          `[ID ${item.id}]  (${item.keys.length} keys)`
-                        ),
-                        React.createElement(
-                          Text,
-                          {
-                            selectable: true,
-                            numberOfLines: 2,
-                            style: { color: "#DBDEE1", fontFamily: "monospace", fontSize: 11, marginTop: 2 }
-                          },
-                          item.keys.join(", ")
-                        )
-                      )
-                    )
-                  : React.createElement(
-                      Text,
-                      { selectable: true, style: { color: "#949BA4", fontSize: 12, padding: 8 } },
-                      query.length < 2 ? "Type at least 2 characters to search exports..." : "No matching modules found."
-                    )
-              ),
-
-          // Close Button
-          React.createElement(
-            TouchableOpacity,
-            {
-              style: { backgroundColor: "#da373c", padding: 12, borderRadius: 8, alignItems: "center", marginTop: 12 },
-              onPress: () => dismissSheet(props)
-            },
-            React.createElement(Text, { style: { color: "#FFFFFF", fontWeight: "bold" } }, "Close Explorer")
-          )
-        );
-      }
-    }),
-    "MetroExplorerSheet"
-  );
+  Navigation.push(() => (
+    <Navigator
+      initialRouteName="MetroExplorerModal"
+      goBackOnBackPress
+      screens={{
+        MetroExplorerModal: {
+          title: "Metro Explorer",
+          headerLeft: modalCloseButton?.(() => Navigation.pop()),
+          render: () => <MetroInspectorUI />,
+        },
+      }}
+    />
+  ));
 }
 
 export default {
   onLoad: () => {},
-  onUnload: () => {
-    dismissSheet();
-  },
-  settings: Settings
+  onUnload: () => {},
+  settings: Settings,
 };
