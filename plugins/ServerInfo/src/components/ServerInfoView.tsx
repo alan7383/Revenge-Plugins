@@ -367,37 +367,35 @@ export default function ServerInfoView({ guildId }: { guildId: string }) {
             </RN.View>
 
             <RN.ScrollView style={{ flex: 1 }}>
-                {/* Banner & Icon Section */}
-                <RN.View style={{ alignItems: "center", marginBottom: 16 }}>
-                    <RN.View style={{ width: "100%", height: 100, backgroundColor: sc("background-tertiary") }}>
-                        {bannerUrl && (
-                            <RN.Image
-                                source={{ uri: bannerUrl }}
-                                style={{ width: "100%", height: "100%", resizeMode: "cover" }}
-                            />
-                        )}
+                {/* Banner Header - Only renders if banner exists */}
+                {bannerUrl && (
+                    <RN.View style={{ width: "100%", height: 120, backgroundColor: sc("background-tertiary") }}>
+                        <RN.Image
+                            source={{ uri: bannerUrl }}
+                            style={{ width: "100%", height: "100%", resizeMode: "cover" }}
+                        />
                     </RN.View>
+                )}
 
-                    <RN.View style={{ marginTop: -35, alignItems: "center", paddingHorizontal: 16 }}>
+                {/* Left-Aligned Icon & Server Header */}
+                <RN.View style={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12 }}>
+                    <RN.View style={{ flexDirection: "row", alignItems: "center" }}>
                         {iconUrl ? (
                             <RN.Image
                                 source={{ uri: iconUrl }}
                                 style={{
-                                    width: 70,
-                                    height: 70,
-                                    borderRadius: 35,
-                                    borderWidth: 3,
-                                    borderColor: sc("background-floating"),
+                                    width: 64,
+                                    height: 64,
+                                    borderRadius: 12,
+                                    backgroundColor: sc("background-tertiary"),
                                 }}
                             />
                         ) : (
                             <RN.View
                                 style={{
-                                    width: 70,
-                                    height: 70,
-                                    borderRadius: 35,
-                                    borderWidth: 3,
-                                    borderColor: sc("background-floating"),
+                                    width: 64,
+                                    height: 64,
+                                    borderRadius: 12,
                                     backgroundColor: sc("background-accent"),
                                     justifyContent: "center",
                                     alignItems: "center",
@@ -406,16 +404,20 @@ export default function ServerInfoView({ guildId }: { guildId: string }) {
                                 <T variant="heading-lg/bold">{guild.name?.slice(0, 2)}</T>
                             </RN.View>
                         )}
-                        <T variant="heading-lg/bold" style={{ marginTop: 8, textAlign: "center" }}>
-                            {guild.name}
-                        </T>
 
-                        {bio && (
-                            <T variant="text-sm/medium" style={{ color: sc("text-muted"), textAlign: "center", marginTop: 4 }}>
-                                {bio}
+                        <RN.View style={{ flex: 1, marginLeft: 14 }}>
+                            <T variant="heading-lg/bold" numberOfLines={2}>
+                                {guild.name}
                             </T>
-                        )}
+                        </RN.View>
                     </RN.View>
+
+                    {/* Server Bio / Description */}
+                    {bio && (
+                        <T variant="text-sm/medium" style={{ color: sc("text-muted"), marginTop: 10 }}>
+                            {bio}
+                        </T>
+                    )}
                 </RN.View>
 
                 {/* OVERVIEW SECTION */}
