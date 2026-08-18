@@ -1,5 +1,5 @@
 {
-    "name": "Server Info",
+    "name": "Metro Inspector",
     "description": "Inspect, search, and copy Metro module exports and property types ,helpful plugin for plugin devs.",
     "authors": [
         {
@@ -7,7 +7,7 @@
             "id": "1381008677301129257"
         }
     ],
-    "main": "src/index.ts",
+    "main": "src/index.tsx",
     "vendetta": {
         "icon": "ic_profile_badge_active_developer"
     }
