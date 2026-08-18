@@ -1,7 +1,9 @@
-import { React } from "@vendetta/react";
+import { metro } from "@vendetta";
 import { Forms } from "@vendetta/ui/components";
 import { openMetroExplorer } from "./index";
 
+// Fallback to window.React or find React directly in Metro
+const React = (window as any).React || metro.findByProps("createElement", "useState");
 const { FormButton, FormSection, FormText } = Forms;
 
 export default function Settings(): React.JSX.Element {
