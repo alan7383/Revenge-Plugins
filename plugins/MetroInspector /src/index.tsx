@@ -6,7 +6,6 @@ const React = (window as any).React || metro.findByProps("createElement", "useSt
 const { View, Text, ScrollView, TouchableOpacity, TextInput } =
   metro.findByProps("ScrollView", "TextInput") || metro.findByProps("View", "Text") || {};
 
-// Navigation and Screen wrappers
 const Navigation = metro.findByProps("push", "pushLazy", "pop");
 const Navigator = metro.findByName("Navigator") ?? metro.findByProps("Navigator")?.Navigator;
 const modalCloseButton =
@@ -31,7 +30,7 @@ function MetroInspectorUI(): React.JSX.Element {
     const q = query.toLowerCase();
 
     for (const [id, mod] of Object.entries<any>(modules)) {
-      if (list.length >= 50) break; // Expanded list threshold
+      if (list.length >= 50) break;
 
       const exports = mod?.publicModule?.exports || mod?.exports;
       if (!exports) continue;
@@ -68,7 +67,6 @@ function MetroInspectorUI(): React.JSX.Element {
 
   return (
     <View style={{ flex: 1, backgroundColor: "#1e1f22", padding: 16 }}>
-      {/* Header Info */}
       <Text style={{ color: "#5865F2", fontSize: 22, fontWeight: "bold" }}>
         ⚡ Metro Explorer
       </Text>
@@ -76,7 +74,6 @@ function MetroInspectorUI(): React.JSX.Element {
         Loaded Modules: {Object.keys(modules).length}
       </Text>
 
-      {/* Search Bar */}
       {TextInput && (
         <TextInput
           style={{
@@ -98,7 +95,6 @@ function MetroInspectorUI(): React.JSX.Element {
         />
       )}
 
-      {/* Main Expanded Viewport */}
       {selectedId ? (
         <View style={{ flex: 1, backgroundColor: "#111214", borderRadius: 8, padding: 12 }}>
           <TouchableOpacity
@@ -148,7 +144,7 @@ function MetroInspectorUI(): React.JSX.Element {
                 </Text>
                 <Text
                   selectable
-                  numberOfLines: 3
+                  numberOfLines={3}
                   style={{
                     color: "#DBDEE1",
                     fontFamily: "monospace",
