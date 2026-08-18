@@ -9,6 +9,6 @@
     ],
     "main": "src/index.tsx",
     "vendetta": {
-        "icon": "ic_full_server_gating_24px"
+        "icon": "flash"
     }
 }
