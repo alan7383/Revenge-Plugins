@@ -1,18 +1,57 @@
 import { metro } from "@vendetta";
 import Settings from "./Settings";
 
-// Safely resolve React and UI primitives from Metro memory
 const React = (window as any).React || metro.findByProps("createElement", "useState");
 
 const { View, Text, ScrollView, TouchableOpacity, TextInput } = 
   metro.findByProps("ScrollView", "TextInput") || metro.findByProps("View", "Text") || {};
 
-const BottomSheet = metro.findByProps("openLazy", "hideActionSheet") || metro.findByProps("openBottomSheet");
+// Find sheet controllers across different client variations
+const BottomSheet = 
+  metro.findByProps("openLazy", "hideActionSheet") || 
+  metro.findByProps("openBottomSheet") || 
+  metro.findByProps("dismiss", "open");
+
+const ActionSheet = metro.findByProps("hideActionSheet") || metro.findByProps("dismissActionSheet");
 
 interface ModuleMatch {
   id: string;
   keys: string[];
   exports: any;
+}
+
+/**
+ * Universal sheet dismissal handler
+ */
+function dismissSheet(props?: any): void {
+  try {
+    if (typeof props?.close === "function") {
+      props.close();
+      return;
+    }
+    if (typeof props?.onClose === "function") {
+      props.onClose();
+      return;
+    }
+    if (BottomSheet?.hideActionSheet) {
+      BottomSheet.hideActionSheet();
+      return;
+    }
+    if (ActionSheet?.hideActionSheet) {
+      ActionSheet.hideActionSheet();
+      return;
+    }
+    if (ActionSheet?.dismissActionSheet) {
+      ActionSheet.dismissActionSheet();
+      return;
+    }
+    if (BottomSheet?.dismiss) {
+      BottomSheet.dismiss();
+      return;
+    }
+  } catch (err) {
+    console.error("[MetroInspector] Failed to close sheet:", err);
+  }
 }
 
 export function openMetroExplorer(): void {
@@ -22,11 +61,10 @@ export function openMetroExplorer(): void {
 
   BottomSheet.openLazy(
     Promise.resolve({
-      default: (props: { close?: () => void }) => {
+      default: (props: { close?: () => void; onClose?: () => void }) => {
         const [query, setQuery] = React.useState("");
         const [selectedId, setSelectedId] = React.useState<string | null>(null);
 
-        // Filter modules matching query
         const matches = React.useMemo(() => {
           if (!query || query.length < 2) return [];
 
@@ -51,7 +89,6 @@ export function openMetroExplorer(): void {
           return list;
         }, [query]);
 
-        // Detail dump for selected module
         const activeDetail = React.useMemo(() => {
           if (!selectedId) return null;
           const mod = modules[selectedId];
@@ -163,10 +200,7 @@ export function openMetroExplorer(): void {
             TouchableOpacity,
             {
               style: { backgroundColor: "#da373c", padding: 12, borderRadius: 8, alignItems: "center", marginTop: 12 },
-              onPress: () => {
-                if (props?.close) props.close();
-                else if (BottomSheet?.hideActionSheet) BottomSheet.hideActionSheet();
-              }
+              onPress: () => dismissSheet(props)
             },
             React.createElement(Text, { style: { color: "#FFFFFF", fontWeight: "bold" } }, "Close Explorer")
           )
@@ -180,9 +214,7 @@ export function openMetroExplorer(): void {
 export default {
   onLoad: () => {},
   onUnload: () => {
-    if (BottomSheet?.hideActionSheet) {
-      BottomSheet.hideActionSheet();
-    }
+    dismissSheet();
   },
   settings: Settings
 };
