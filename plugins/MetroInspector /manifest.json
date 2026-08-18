@@ -9,6 +9,6 @@
     ],
     "main": "src/index.tsx",
     "vendetta": {
-        "icon": "ic_profile_badge_active_developer"
+        "icon": "flash"
     }
 }
