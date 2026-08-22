@@ -41,8 +41,7 @@ const PLATFORMS = [
         label: "Desktop (Windows)",
         value: "desktop",
         subLabel: "Shows Desktop client icon",
-        // Forces black monitor icon to render white/light
-        icon: () => renderIcon("ic_monitor", "#ffffff"), 
+        icon: () => renderIcon("ic_monitor", "#ffffff"),
     },
     {
         label: "Web / Browser (Chrome)",
