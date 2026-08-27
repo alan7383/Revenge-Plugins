@@ -1,13 +1,63 @@
 import { findByProps } from "@vendetta/metro";
-import { instead } from "@vendetta/patcher";
+import { instead, after } from "@vendetta/patcher";
 import { showToast } from "@vendetta/ui/toasts";
 
-// Metro modules for message actions and UI components
-const MessageActions = findByProps("deleteMessage", "dismissAutomodMessage");
+// 1. Resolve Metro modules dynamically
+const MessageActions =
+    findByProps("deleteMessage", "dismissAutomodMessage") ??
+    findByProps("deleteMessage");
+
 const RowManager = findByProps("getRow", "getRows");
+const MessageRow = findByProps("MessageRow") ?? findByProps("handleTap");
 
 let patches: Array<() => void> = [];
 const clickTracker = new Map<string, { count: number; timer: NodeJS.Timeout }>();
+
+// Helper to fire message deletion safely
+function triggerMessageDelete(channelId: string, messageId: string) {
+    if (!MessageActions?.deleteMessage) {
+        showToast("Error: deleteMessage API unavailable", undefined);
+        return;
+    }
+
+    try {
+        MessageActions.deleteMessage(channelId, messageId);
+        showToast("Message deleted", undefined);
+    } catch (err: any) {
+        showToast(`Delete failed: ${err?.message || err}`, undefined);
+    }
+}
+
+// Track taps and fire on 3rd click within 400ms window
+function handleMessageTap(channelId: string, messageId: string, originalPress?: Function, args?: any) {
+    const current = clickTracker.get(messageId) || {
+        count: 0,
+        timer: setTimeout(() => {}, 0),
+    };
+
+    clearTimeout(current.timer);
+    const newCount = current.count + 1;
+
+    if (newCount >= 3) {
+        // Triple-tap reached: cancel original action & delete message
+        clickTracker.delete(messageId);
+        triggerMessageDelete(channelId, messageId);
+        return true; // Interrupted
+    }
+
+    // Set 400ms tap window
+    const timer = setTimeout(() => {
+        clickTracker.delete(messageId);
+    }, 400);
+
+    clickTracker.set(messageId, { count: newCount, timer });
+
+    // Allow normal press behavior for 1st and 2nd taps
+    if (originalPress) {
+        return originalPress.apply(this, args);
+    }
+    return false;
+}
 
 export default {
     onLoad: () => {
@@ -16,61 +66,62 @@ export default {
             return;
         }
 
-        // Patch the row press handler (or double tap handler depending on build)
-        // Adjust the component patch target if your client uses a custom render row
-        const MessageItem = findByProps("Message", "default") || findByProps("MessageRow");
-        
-        if (!MessageItem) {
-            showToast("Failed to find Message UI components", undefined);
-            return;
+        // Patch strategy 1: Direct RowManager press hook (most accurate on mobile RN)
+        if (RowManager?.prototype) {
+            patches.push(
+                instead("generateRows", RowManager.prototype, (args, orig) => {
+                    const rows = orig.apply(this, args);
+                    if (!Array.isArray(rows)) return rows;
+
+                    return rows.map((row) => {
+                        if (row?.type === "MESSAGE" && row?.message) {
+                            const origOnPress = row.onPress;
+                            row.onPress = (...pressArgs: any[]) => {
+                                const interrupted = handleMessageTap(
+                                    row.message.channel_id || row.message.channelId,
+                                    row.message.id,
+                                    origOnPress,
+                                    pressArgs
+                                );
+                                if (!interrupted && typeof origOnPress === "function") {
+                                    origOnPress(...pressArgs);
+                                }
+                            };
+                        }
+                        return row;
+                    });
+                })
+            );
         }
 
-        // Alternative safe target: patch native touch handler on row items
-        const TouchHandler = findByProps("handleTap", "handlePress") || MessageItem;
+        // Patch strategy 2: Fallback to MessageRow component props
+        if (MessageRow && patches.length === 0) {
+            const targetMethod = MessageRow.handleTap ? "handleTap" : "default";
+            patches.push(
+                instead(targetMethod, MessageRow, (args, orig) => {
+                    const [props] = args;
+                    const message = props?.message || args[1];
+                    const messageId = message?.id;
+                    const channelId = message?.channel_id || message?.channelId;
 
-        patches.push(
-            instead("handleTap", TouchHandler, (args, orig) => {
-                const [event, message] = args;
-                const messageId = message?.id;
-
-                if (!messageId || !message?.channel_id) {
-                    return orig.apply(this, args);
-                }
-
-                const current = clickTracker.get(messageId) || {
-                    count: 0,
-                    timer: setTimeout(() => {}, 0),
-                };
-
-                clearTimeout(current.timer);
-                const newCount = current.count + 1;
-
-                if (newCount >= 3) {
-                    // Trigger delete on 3rd tap
-                    clickTracker.delete(messageId);
-                    
-                    try {
-                        MessageActions.deleteMessage(message.channel_id, messageId);
-                        showToast("Deleting message...", undefined);
-                    } catch (err: any) {
-                        showToast(`Delete failed: ${err?.message || err}`, undefined);
+                    if (!messageId || !channelId) {
+                        return orig.apply(this, args);
                     }
-                    return;
-                }
 
-                // Reset click counter after 400ms delay between taps
-                const timer = setTimeout(() => {
-                    clickTracker.delete(messageId);
-                }, 400);
+                    const interrupted = handleMessageTap(channelId, messageId, orig, args);
+                    if (!interrupted) {
+                        return orig.apply(this, args);
+                    }
+                })
+            );
+        }
 
-                clickTracker.set(messageId, { count: newCount, timer });
-                return orig.apply(this, args);
-            })
-        );
+        if (patches.length === 0) {
+            showToast("TripleTapDelete: Failed to hook row press", undefined);
+        }
     },
 
     onUnload: () => {
-        // Clear all patches and active click timers
         patches.forEach((unpatch) => unpatch());
         patches = [];
 
