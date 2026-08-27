@@ -1,17 +1,34 @@
 import { findByProps } from "@vendetta/metro";
+import { instead, after } from "@vendetta/patcher";
 import { showToast } from "@vendetta/ui/toasts";
 
 const MessageActions =
     findByProps("deleteMessage", "dismissAutomodMessage") ??
     findByProps("deleteMessage");
 
-const Dispatcher = findByProps("dispatch", "subscribe");
+const MessagesHandlersModule = findByProps("MessagesHandlers");
+const MessagesHandlers = MessagesHandlersModule?.MessagesHandlers;
 
-let unlisten: (() => void) | null = null;
-const clickTracker = new Map<string, { count: number; timer: NodeJS.Timeout }>();
+let patches: Array<() => void> = [];
+let currentTapCount = 0;
+let currentMessageID: string | null = null;
+let tapTimeout: NodeJS.Timeout | null = null;
+
+function resetTapState() {
+    if (tapTimeout) {
+        clearTimeout(tapTimeout);
+        tapTimeout = null;
+    }
+    currentTapCount = 0;
+    currentMessageID = null;
+}
 
 function triggerDelete(channelId: string, messageId: string) {
-    if (!MessageActions?.deleteMessage) return;
+    if (!MessageActions?.deleteMessage) {
+        showToast("Error: deleteMessage API unavailable", undefined);
+        return;
+    }
+
     try {
         MessageActions.deleteMessage(channelId, messageId);
         showToast("Message deleted", undefined);
@@ -20,74 +37,90 @@ function triggerDelete(channelId: string, messageId: string) {
     }
 }
 
-function processTap(channelId: string, messageId: string): boolean {
-    const current = clickTracker.get(messageId) || {
-        count: 0,
-        timer: setTimeout(() => {}, 0),
-    };
+function patchHandlers(handlers: any) {
+    if (!handlers || handlers.__triple_tap_patched) return;
+    handlers.__triple_tap_patched = true;
 
-    clearTimeout(current.timer);
-    const newCount = current.count + 1;
+    if (handlers.handleTapMessage) {
+        const patch = after("handleTapMessage", handlers, (args) => {
+            const nativeEvent = args?.[0]?.nativeEvent;
+            if (!nativeEvent) return;
 
-    if (newCount >= 3) {
-        clickTracker.delete(messageId);
-        triggerDelete(channelId, messageId);
-        return true;
+            const channelId = nativeEvent.channelId;
+            const messageId = nativeEvent.messageId;
+            if (!channelId || !messageId) return;
+
+            // Track tap sequence per message
+            if (currentMessageID === messageId) {
+                currentTapCount++;
+            } else {
+                resetTapState();
+                currentTapCount = 1;
+                currentMessageID = messageId;
+            }
+
+            // Set multi-tap timeout window (400ms)
+            if (tapTimeout) clearTimeout(tapTimeout);
+            tapTimeout = setTimeout(() => {
+                resetTapState();
+            }, 400);
+
+            // Execute on 3rd tap
+            if (currentTapCount >= 3) {
+                const targetMessageId = currentMessageID;
+                resetTapState();
+                triggerDelete(channelId, targetMessageId);
+            }
+        });
+
+        patches.push(patch);
     }
-
-    const timer = setTimeout(() => {
-        clickTracker.delete(messageId);
-    }, 450);
-
-    clickTracker.set(messageId, { count: newCount, timer });
-    return false;
 }
 
 export default {
-    onLoad: () => {
+    onLoad() {
         if (!MessageActions?.deleteMessage) {
             showToast("Failed to find MessageActions API", undefined);
             return;
         }
 
-        if (!Dispatcher?.subscribe) {
-            showToast("Failed to hook Dispatcher", undefined);
+        if (!MessagesHandlers?.prototype) {
+            showToast("Failed to find MessagesHandlers prototype", undefined);
             return;
         }
 
-        // Intercept message interaction dispatches across mobile UI
-        const handleDispatch = (event: any) => {
-            const messageId = event?.messageId || event?.message?.id || event?.id;
-            const channelId = event?.channelId || event?.message?.channel_id || event?.channel_id;
+        const origGetParams = Object.getOwnPropertyDescriptor(
+            MessagesHandlers.prototype,
+            "params"
+        )?.get;
 
-            // Target message touch/selection events
-            if (
-                event?.type === "MESSAGE_SELECT" ||
-                event?.type === "MESSAGE_TAP" ||
-                event?.type === "MESSAGE_ACTION_SHEET_OPEN"
-            ) {
-                if (messageId && channelId) {
-                    processTap(channelId, messageId);
-                }
-            }
-        };
+        if (origGetParams) {
+            Object.defineProperty(MessagesHandlers.prototype, "params", {
+                configurable: true,
+                get() {
+                    patchHandlers(this);
+                    return origGetParams.call(this);
+                },
+            });
 
-        Dispatcher.subscribe("MESSAGE_SELECT", handleDispatch);
-        Dispatcher.subscribe("MESSAGE_TAP", handleDispatch);
-        Dispatcher.subscribe("MESSAGE_ACTION_SHEET_OPEN", handleDispatch);
+            patches.push(() => {
+                try {
+                    Object.defineProperty(MessagesHandlers.prototype, "params", {
+                        configurable: true,
+                        get: origGetParams,
+                    });
+                } catch (e) {}
+            });
 
-        unlisten = () => {
-            Dispatcher.unsubscribe("MESSAGE_SELECT", handleDispatch);
-            Dispatcher.unsubscribe("MESSAGE_TAP", handleDispatch);
-            Dispatcher.unsubscribe("MESSAGE_ACTION_SHEET_OPEN", handleDispatch);
-        };
-
-        showToast("TripleTapDelete loaded successfully", undefined);
+            showToast("TripleTapDelete loaded successfully", undefined);
+        } else {
+            showToast("TripleTapDelete: MessagesHandlers params getter missing", undefined);
+        }
     },
 
-    onUnload: () => {
-        if (unlisten) unlisten();
-        clickTracker.forEach((val) => clearTimeout(val.timer));
-        clickTracker.clear();
+    onUnload() {
+        resetTapState();
+        patches.forEach((unpatch) => unpatch());
+        patches = [];
     },
 };
