@@ -1,14 +1,13 @@
 import { findByProps } from "@vendetta/metro";
-import { after } from "@vendetta/patcher";
 import { showToast } from "@vendetta/ui/toasts";
 
 const MessageActions =
     findByProps("deleteMessage", "dismissAutomodMessage") ??
     findByProps("deleteMessage");
 
-const MessagePressHook = findByProps("useOnPressMessageItem");
+const Dispatcher = findByProps("dispatch", "subscribe");
 
-let patches: Array<() => void> = [];
+let unlisten: (() => void) | null = null;
 const clickTracker = new Map<string, { count: number; timer: NodeJS.Timeout }>();
 
 function triggerDelete(channelId: string, messageId: string) {
@@ -33,12 +32,12 @@ function processTap(channelId: string, messageId: string): boolean {
     if (newCount >= 3) {
         clickTracker.delete(messageId);
         triggerDelete(channelId, messageId);
-        return true; // Interrupted 3rd click
+        return true;
     }
 
     const timer = setTimeout(() => {
         clickTracker.delete(messageId);
-    }, 400);
+    }, 450);
 
     clickTracker.set(messageId, { count: newCount, timer });
     return false;
@@ -51,33 +50,43 @@ export default {
             return;
         }
 
-        if (MessagePressHook?.useOnPressMessageItem) {
-            patches.push(
-                after("useOnPressMessageItem", MessagePressHook, (args, origPress) => {
-                    const [message] = args;
-                    const messageId = message?.id;
-                    const channelId = message?.channel_id || message?.channelId;
-
-                    if (!messageId || !channelId) return origPress;
-
-                    return (...pressArgs: any[]) => {
-                        const interrupted = processTap(channelId, messageId);
-                        if (!interrupted && typeof origPress === "function") {
-                            origPress(...pressArgs);
-                        }
-                    };
-                })
-            );
-            showToast("TripleTapDelete: Hooked successfully", undefined);
-        } else {
-            showToast("TripleTapDelete: Hook missing", undefined);
+        if (!Dispatcher?.subscribe) {
+            showToast("Failed to hook Dispatcher", undefined);
+            return;
         }
+
+        // Intercept message interaction dispatches across mobile UI
+        const handleDispatch = (event: any) => {
+            const messageId = event?.messageId || event?.message?.id || event?.id;
+            const channelId = event?.channelId || event?.message?.channel_id || event?.channel_id;
+
+            // Target message touch/selection events
+            if (
+                event?.type === "MESSAGE_SELECT" ||
+                event?.type === "MESSAGE_TAP" ||
+                event?.type === "MESSAGE_ACTION_SHEET_OPEN"
+            ) {
+                if (messageId && channelId) {
+                    processTap(channelId, messageId);
+                }
+            }
+        };
+
+        Dispatcher.subscribe("MESSAGE_SELECT", handleDispatch);
+        Dispatcher.subscribe("MESSAGE_TAP", handleDispatch);
+        Dispatcher.subscribe("MESSAGE_ACTION_SHEET_OPEN", handleDispatch);
+
+        unlisten = () => {
+            Dispatcher.unsubscribe("MESSAGE_SELECT", handleDispatch);
+            Dispatcher.unsubscribe("MESSAGE_TAP", handleDispatch);
+            Dispatcher.unsubscribe("MESSAGE_ACTION_SHEET_OPEN", handleDispatch);
+        };
+
+        showToast("TripleTapDelete loaded successfully", undefined);
     },
 
     onUnload: () => {
-        patches.forEach((unpatch) => unpatch());
-        patches = [];
-
+        if (unlisten) unlisten();
         clickTracker.forEach((val) => clearTimeout(val.timer));
         clickTracker.clear();
     },
