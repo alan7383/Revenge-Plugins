@@ -1,10 +1,9 @@
 import { findByProps } from "@vendetta/metro";
-import { instead, after } from "@vendetta/patcher";
+import { after } from "@vendetta/patcher";
 import { showToast } from "@vendetta/ui/toasts";
 
-const MessageActions =
-    findByProps("deleteMessage", "dismissAutomodMessage") ??
-    findByProps("deleteMessage");
+// Extract HTTP RestAPI client instead of relying on MessageActions store
+const RestAPI = findByProps("get", "post", "del", "patch");
 
 const MessagesHandlersModule = findByProps("MessagesHandlers");
 const MessagesHandlers = MessagesHandlersModule?.MessagesHandlers;
@@ -23,14 +22,14 @@ function resetTapState() {
     currentMessageID = null;
 }
 
-function triggerDelete(channelId: string, messageId: string) {
-    if (!MessageActions?.deleteMessage) {
-        showToast("Error: deleteMessage API unavailable", undefined);
+async function deleteMessageDirectly(channelId: string, messageId: string) {
+    if (!RestAPI?.del) {
+        showToast("Error: RestAPI unavailable", undefined);
         return;
     }
 
     try {
-        MessageActions.deleteMessage(channelId, messageId);
+        await RestAPI.del({ url: `/channels/${channelId}/messages/${messageId}` });
         showToast("Message deleted", undefined);
     } catch (err: any) {
         showToast(`Delete failed: ${err?.message || err}`, undefined);
@@ -50,7 +49,7 @@ function patchHandlers(handlers: any) {
             const messageId = nativeEvent.messageId;
             if (!channelId || !messageId) return;
 
-            // Track tap sequence per message
+            // Track sequential taps on the exact same message
             if (currentMessageID === messageId) {
                 currentTapCount++;
             } else {
@@ -59,7 +58,7 @@ function patchHandlers(handlers: any) {
                 currentMessageID = messageId;
             }
 
-            // Set multi-tap timeout window (400ms)
+            // Timeout window for multi-tap detection (400ms)
             if (tapTimeout) clearTimeout(tapTimeout);
             tapTimeout = setTimeout(() => {
                 resetTapState();
@@ -67,9 +66,10 @@ function patchHandlers(handlers: any) {
 
             // Execute on 3rd tap
             if (currentTapCount >= 3) {
+                const targetChannelId = channelId;
                 const targetMessageId = currentMessageID;
                 resetTapState();
-                triggerDelete(channelId, targetMessageId);
+                deleteMessageDirectly(targetChannelId, targetMessageId);
             }
         });
 
@@ -79,8 +79,8 @@ function patchHandlers(handlers: any) {
 
 export default {
     onLoad() {
-        if (!MessageActions?.deleteMessage) {
-            showToast("Failed to find MessageActions API", undefined);
+        if (!RestAPI?.del) {
+            showToast("Failed to find RestAPI client", undefined);
             return;
         }
 
@@ -112,9 +112,9 @@ export default {
                 } catch (e) {}
             });
 
-            showToast("TripleTapDelete loaded successfully", undefined);
+            showToast("TripleTapDelete loaded", undefined);
         } else {
-            showToast("TripleTapDelete: MessagesHandlers params getter missing", undefined);
+            showToast("TripleTapDelete: getter missing", undefined);
         }
     },
 
