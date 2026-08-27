@@ -1,0 +1,16 @@
+{
+  "name": "TripleTapDelete",
+  "description": "Delete any message instantly by tapping it 3 times.",
+  "authors": [
+    {
+      "name": "fshinz",
+      "id": "0"
+    }
+  ],
+  "main": "index.ts",
+  "hash": "auto",
+  "vendetta": {
+    "icon": "ic_message_delete"
+  }
+}
+
